@@ -1,7 +1,7 @@
 """other — split from ledgers.py."""
 from ._common import *  # noqa
 
-from app.services.decision_ledger import _material_values
+from app.services.decision_ledger import _material_values, build_category_summary
 
 
 @bp.route('/decision_ledger')
@@ -226,6 +226,11 @@ def decision_ledger():
     overall_totals = {field: sum(m[field] for m in overall_material_summary)
                       for field in ('booked_cost', 'dispatched_cost', 'remaining_cost', 'unpriced_qty')}
 
+    # Presentation grouping only: buckets the figures computed above under the
+    # Material-Master categories.  No number is recomputed or re-allocated
+    # here, so the All-Categories totals stay identical to the flat summary.
+    category_summary = build_category_summary(overall_material_summary, _material_norm_key)
+
     category_options = sorted({c.category for c in clients if c.category})
     for default_cat in ['General', 'Open Khata', 'Walking-Customer', 'Misc']:
         if default_cat not in category_options:
@@ -234,6 +239,7 @@ def decision_ledger():
 
     return render_template('decision_ledger.html',
                            overall_material_summary=overall_material_summary,
+                           category_summary=category_summary,
                            data=paged,
                            q=q,
                            category_filter=category_filter,
