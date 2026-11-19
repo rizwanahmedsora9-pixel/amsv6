@@ -106,6 +106,27 @@ def decision_ledger():
                 dispatched_map[key] = dispatched_map.get(key, 0) + float(e.qty or 0)
                 material_labels.setdefault(key, (e.booked_material or e.material or '').strip())
 
+        # Booked-material returns credit qty back into the booking pool. The
+        # cancel plan and the sale-allocation pool already net them (same
+        # tagging as booking_cancel_plan); without this the summary printed a
+        # negative remaining after a return + cancel — e.g. Ring 6x6 showed
+        # 87.1 dispatched − 12.4 returned = 74.7 booked, not −12.4.
+        returned_map = {}
+        return_entries = Entry.query.filter(
+            client_entry_match,
+            Entry.type == 'IN',
+            Entry.is_void == False,
+            Entry.nimbus_no == 'Material Return',
+            or_(
+                Entry.transaction_category == 'Booked Return',
+                Entry.client_category == 'Booked Return',
+            )
+        ).all()
+        for e in return_entries:
+            key = _material_norm_key(e.booked_material or e.material)
+            if key:
+                returned_map[key] = returned_map.get(key, 0) + float(e.qty or 0)
+
         materials_summary = []
         total_remaining_qty = 0
         total_reserved_cost = 0
@@ -115,7 +136,9 @@ def decision_ledger():
 
         for m in sorted(all_mats, key=lambda x: str(material_labels.get(x, x)).lower()):
             b = booked_map.get(m, 0)
-            d = dispatched_map.get(m, 0)
+            # Net of booked returns; never below zero — an over-return leaves
+            # the full booked obligation standing, as in booking_cancel_plan.
+            d = max(0.0, dispatched_map.get(m, 0) - returned_map.get(m, 0))
             rem = b - d
             booked_cost, dispatched_cost, remaining_cost, unpriced_qty = _material_values(
                 items_by_material.get(m, []), d, allocated_by_item

@@ -37,7 +37,7 @@
             <div class="ledger-stat"><div class="ledger-stat-label">Delivered value</div><div class="ledger-stat-value text-success">{{ money(overall_totals.dispatched_cost) }}</div></div>
             <div class="ledger-stat"><div class="ledger-stat-label">Remaining value</div><div class="ledger-stat-value text-warning">{{ money(overall_totals.remaining_cost) }}</div></div>
         </div>
-        <p class="text-white-50 small mt-3 mb-0">Gross booking prices before discounts. Deliveries use allocated booking rates; older unallocated deliveries are estimated using the oldest available booking rates. Remaining value = booked − delivered.</p>
+        <p class="text-white-50 small mt-3 mb-0">Gross booking prices before discounts. Delivered is net of booked-material returns (dispatches − returns). Deliveries use allocated booking rates; older unallocated deliveries are estimated using the oldest available booking rates. Remaining value = booked − delivered.</p>
         {% if overall_totals.unpriced_qty > 0 %}<p class="text-warning small mt-2 mb-0">{{ qty(overall_totals.unpriced_qty) }} delivered units have no matching booking quantity and are not priced.</p>{% endif %}
     </div>
     <div class="table-responsive">
