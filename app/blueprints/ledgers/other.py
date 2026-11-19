@@ -1,7 +1,7 @@
 """other — split from ledgers.py."""
 from ._common import *  # noqa
 
-from app.services.decision_ledger import _material_values
+from app.services.decision_ledger import _material_values, build_category_summary
 
 
 @bp.route('/decision_ledger')
@@ -106,6 +106,27 @@ def decision_ledger():
                 dispatched_map[key] = dispatched_map.get(key, 0) + float(e.qty or 0)
                 material_labels.setdefault(key, (e.booked_material or e.material or '').strip())
 
+        # Booked-material returns credit qty back into the booking pool. The
+        # cancel plan and the sale-allocation pool already net them (same
+        # tagging as booking_cancel_plan); without this the summary printed a
+        # negative remaining after a return + cancel — e.g. Ring 6x6 showed
+        # 87.1 dispatched − 12.4 returned = 74.7 booked, not −12.4.
+        returned_map = {}
+        return_entries = Entry.query.filter(
+            client_entry_match,
+            Entry.type == 'IN',
+            Entry.is_void == False,
+            Entry.nimbus_no == 'Material Return',
+            or_(
+                Entry.transaction_category == 'Booked Return',
+                Entry.client_category == 'Booked Return',
+            )
+        ).all()
+        for e in return_entries:
+            key = _material_norm_key(e.booked_material or e.material)
+            if key:
+                returned_map[key] = returned_map.get(key, 0) + float(e.qty or 0)
+
         materials_summary = []
         total_remaining_qty = 0
         total_reserved_cost = 0
@@ -115,7 +136,9 @@ def decision_ledger():
 
         for m in sorted(all_mats, key=lambda x: str(material_labels.get(x, x)).lower()):
             b = booked_map.get(m, 0)
-            d = dispatched_map.get(m, 0)
+            # Net of booked returns; never below zero — an over-return leaves
+            # the full booked obligation standing, as in booking_cancel_plan.
+            d = max(0.0, dispatched_map.get(m, 0) - returned_map.get(m, 0))
             rem = b - d
             booked_cost, dispatched_cost, remaining_cost, unpriced_qty = _material_values(
                 items_by_material.get(m, []), d, allocated_by_item
@@ -203,6 +226,11 @@ def decision_ledger():
     overall_totals = {field: sum(m[field] for m in overall_material_summary)
                       for field in ('booked_cost', 'dispatched_cost', 'remaining_cost', 'unpriced_qty')}
 
+    # Presentation grouping only: buckets the figures computed above under the
+    # Material-Master categories.  No number is recomputed or re-allocated
+    # here, so the All-Categories totals stay identical to the flat summary.
+    category_summary = build_category_summary(overall_material_summary, _material_norm_key)
+
     category_options = sorted({c.category for c in clients if c.category})
     for default_cat in ['General', 'Open Khata', 'Walking-Customer', 'Misc']:
         if default_cat not in category_options:
@@ -211,6 +239,7 @@ def decision_ledger():
 
     return render_template('decision_ledger.html',
                            overall_material_summary=overall_material_summary,
+                           category_summary=category_summary,
                            data=paged,
                            q=q,
                            category_filter=category_filter,

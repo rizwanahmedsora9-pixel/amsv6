@@ -17,9 +17,28 @@
         .ledger-summary-grid { grid-template-columns: 1fr; }
         .ledger-material-badge { width: 100%; min-width: 210px; }
     }
+    /* --- Category-wise expandable summary --- */
+    .dl-cat-row { background: #132039; cursor: pointer; }
+    .dl-cat-row:hover { background: #1a2b4d; }
+    .dl-cat-row > td { border-top: 2px solid #3d4f6b; font-weight: 600; }
+    .dl-cat-row:focus-visible { outline: 2px solid #f8b71e; outline-offset: -2px; }
+    .dl-chev { color: #f8b71e; display: inline-block; transition: transform .18s ease; }
+    .dl-cat-row[aria-expanded="true"] .dl-chev { transform: rotate(90deg); }
+    .dl-mat-row > td:first-child { padding-left: 2.4rem; }
+    .dl-mat-row > td { font-weight: 400; }
+    .dl-mat-row { animation: dl-fade .16s ease; }
+    .dl-qty-line { white-space: nowrap; }
+    @keyframes dl-fade {
+        from { opacity: 0; transform: translateY(-2px); }
+        to { opacity: 1; transform: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .dl-chev, .dl-mat-row { transition: none; animation: none; }
+    }
 </style>
 {% macro qty(value) %}{{ "{:,.2f}".format(value or 0).rstrip('0').rstrip('.') }}{% endmacro %}
 {% macro money(value) %}{{ currency_symbol }}{{ "{:,.2f}".format(value or 0) }}{% endmacro %}
+{% macro cat_qty(buckets, field) %}{% for b in buckets %}<div class="dl-qty-line">{{ qty(b[field]) }}{% if b.label %} <small class="text-white-50">{{ b.label }}</small>{% endif %}</div>{% endfor %}{% endmacro %}
 <div class="mb-4">
     <h2 class="fw-bold text-warning"><i class="bi bi-clipboard-data me-2"></i>Decision Ledger</h2>
     <p class="text-white-50">Consolidated view of all client financials and material status.</p>
@@ -33,20 +52,68 @@
     </div>
     <div class="p-3 p-md-4">
         <div class="ledger-summary-grid">
-            <div class="ledger-stat"><div class="ledger-stat-label">Booked value</div><div class="ledger-stat-value text-info">{{ money(overall_totals.booked_cost) }}</div></div>
-            <div class="ledger-stat"><div class="ledger-stat-label">Delivered value</div><div class="ledger-stat-value text-success">{{ money(overall_totals.dispatched_cost) }}</div></div>
-            <div class="ledger-stat"><div class="ledger-stat-label">Remaining value</div><div class="ledger-stat-value text-warning">{{ money(overall_totals.remaining_cost) }}</div></div>
+            <div class="ledger-stat"><div class="ledger-stat-label">Booked value</div><div class="ledger-stat-value text-info" id="dl-card-booked">{{ money(overall_totals.booked_cost) }}</div></div>
+            <div class="ledger-stat"><div class="ledger-stat-label">Delivered value</div><div class="ledger-stat-value text-success" id="dl-card-delivered">{{ money(overall_totals.dispatched_cost) }}</div></div>
+            <div class="ledger-stat"><div class="ledger-stat-label">Remaining value</div><div class="ledger-stat-value text-warning" id="dl-card-remaining">{{ money(overall_totals.remaining_cost) }}</div></div>
         </div>
-        <p class="text-white-50 small mt-3 mb-0">Gross booking prices before discounts. Deliveries use allocated booking rates; older unallocated deliveries are estimated using the oldest available booking rates. Remaining value = booked − delivered.</p>
+        <p class="text-white-50 small mt-3 mb-0">Gross booking prices before discounts. Delivered is net of booked-material returns (dispatches − returns). Deliveries use allocated booking rates; older unallocated deliveries are estimated using the oldest available booking rates. Remaining value = booked − delivered.</p>
         {% if overall_totals.unpriced_qty > 0 %}<p class="text-warning small mt-2 mb-0">{{ qty(overall_totals.unpriced_qty) }} delivered units have no matching booking quantity and are not priced.</p>{% endif %}
+    </div>
+    <div class="p-3 p-md-4 pb-2">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-4 col-sm-6">
+                <label class="text-white-50 small fw-bold mb-1" for="dl-cat-filter">Material category</label>
+                <select id="dl-cat-filter" class="form-select bg-dark text-white border-secondary">
+                    <option value="">All Categories</option>
+                    {% for g in category_summary %}
+                    <option value="{{ g.key }}">{{ g.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-5 col-sm-6">
+                <label class="text-white-50 small fw-bold mb-1" for="dl-mat-search">Search material</label>
+                <div class="input-group">
+                    <span class="input-group-text bg-dark border-secondary text-white-50"><i class="bi bi-search"></i></span>
+                    <input id="dl-mat-search" type="search" class="form-control bg-dark text-white border-secondary"
+                           placeholder="Material name..." autocomplete="off">
+                </div>
+            </div>
+        </div>
     </div>
     <div class="table-responsive">
         <table class="table table-dark table-hover align-middle mb-0 ledger-table">
             <thead><tr><th class="ps-4">Material</th><th class="text-end">Booked qty</th><th class="text-end">Booked value</th><th class="text-end">Delivered qty</th><th class="text-end">Delivered value</th><th class="text-end">Remaining qty</th><th class="text-end pe-4">Remaining value</th></tr></thead>
-            <tbody>
-                {% for item in overall_material_summary %}
-                <tr><td class="ps-4 fw-bold text-warning">{{ item.name }}</td><td class="text-end">{{ qty(item.booked) }}</td><td class="text-end">{{ money(item.booked_cost) }}</td><td class="text-end">{{ qty(item.dispatched) }}</td><td class="text-end text-success">{{ money(item.dispatched_cost) }}</td><td class="text-end">{{ qty(item.remaining) }}</td><td class="text-end pe-4 text-warning">{{ money(item.remaining_cost) }}</td></tr>
-                {% else %}<tr><td colspan="7" class="text-center text-white-50 py-4">No material activity found.</td></tr>{% endfor %}
+            <tbody id="dl-summary-body">
+                {% for g in category_summary %}
+                <tr class="dl-cat-row" data-cat="{{ g.key }}" aria-expanded="false" role="button" tabindex="0"
+                    title="Expand or collapse {{ g.name }}">
+                    <td class="ps-4"><i class="bi bi-chevron-right dl-chev me-1" aria-hidden="true"></i>{{ g.name }} <span class="text-white-50 small">({{ g.materials|length }})</span></td>
+                    <td class="text-end">{{ cat_qty(g.qty_buckets, 'booked') }}</td>
+                    <td class="text-end">{{ money(g.booked_cost) }}</td>
+                    <td class="text-end">{{ cat_qty(g.qty_buckets, 'dispatched') }}</td>
+                    <td class="text-end text-success">{{ money(g.dispatched_cost) }}</td>
+                    <td class="text-end">{{ cat_qty(g.qty_buckets, 'remaining') }}</td>
+                    <td class="text-end pe-4 text-warning">{{ money(g.remaining_cost) }}</td>
+                </tr>
+                {% for item in g.materials %}
+                <tr class="dl-mat-row" data-cat="{{ g.key }}" data-name="{{ item.name|lower }}" hidden>
+                    <td class="text-warning">{{ item.name }}{% if item.unit %} <small class="text-white-50">{{ item.unit }}</small>{% endif %}</td>
+                    <td class="text-end">{{ qty(item.booked) }}</td>
+                    <td class="text-end">{{ money(item.booked_cost) }}</td>
+                    <td class="text-end">{{ qty(item.dispatched) }}</td>
+                    <td class="text-end text-success">{{ money(item.dispatched_cost) }}</td>
+                    <td class="text-end">{{ qty(item.remaining) }}</td>
+                    <td class="text-end pe-4 text-warning">{{ money(item.remaining_cost) }}</td>
+                </tr>
+                {% endfor %}
+                {% if not g.materials %}
+                <tr class="dl-mat-row dl-empty-row" data-cat="{{ g.key }}" hidden>
+                    <td colspan="7" class="text-center text-white-50 py-3">No material activity in this category.</td>
+                </tr>
+                {% endif %}
+                {% else %}
+                <tr><td colspan="7" class="text-center text-white-50 py-4">No material activity found.</td></tr>
+                {% endfor %}
             </tbody>
         </table>
     </div>
@@ -168,4 +235,92 @@
         </div>
     </div>
 </div>
+<script>
+(function () {
+    function init() {
+        var sel = document.getElementById('dl-cat-filter');
+        var search = document.getElementById('dl-mat-search');
+        var rows = Array.prototype.slice.call(document.querySelectorAll('.dl-cat-row'));
+        if (!sel || !rows.length) { return; }
+        var matRows = Array.prototype.slice.call(document.querySelectorAll('.dl-mat-row'));
+        var cardBooked = document.getElementById('dl-card-booked');
+        var cardDelivered = document.getElementById('dl-card-delivered');
+        var cardRemaining = document.getElementById('dl-card-remaining');
+        if (!cardBooked || !cardDelivered || !cardRemaining) { return; }
+        // All-Categories values as server-rendered; the category rows carry
+        // their own server-formatted cells, so the cards can never drift from
+        // the table (no second rounding path).
+        var allCards = {
+            booked: cardBooked.textContent,
+            delivered: cardDelivered.textContent,
+            remaining: cardRemaining.textContent
+        };
+        var userState = {};
+
+        function setCards(key) {
+            if (!key || key === 'all') {
+                cardBooked.textContent = allCards.booked;
+                cardDelivered.textContent = allCards.delivered;
+                cardRemaining.textContent = allCards.remaining;
+                return;
+            }
+            var row = null;
+            for (var i = 0; i < rows.length; i++) {
+                if (rows[i].getAttribute('data-cat') === key) { row = rows[i]; break; }
+            }
+            if (!row) { return; }
+            cardBooked.textContent = row.cells[2].textContent.trim();
+            cardDelivered.textContent = row.cells[4].textContent.trim();
+            cardRemaining.textContent = row.cells[6].textContent.trim();
+        }
+
+        function apply() {
+            var cat = sel.value;
+            var q = ((search && search.value) || '').trim().toLowerCase();
+            rows.forEach(function (row) {
+                var key = row.getAttribute('data-cat');
+                var kids = matRows.filter(function (r) { return r.getAttribute('data-cat') === key; });
+                var matched = kids.filter(function (r) {
+                    var name = r.getAttribute('data-name');
+                    return name !== null && (!q || name.indexOf(q) !== -1);
+                });
+                var inCat = !cat || cat === key;
+                var visible = inCat && (!q || matched.length > 0);
+                var autoOpen = (!!cat && cat === key) || (!!q && matched.length > 0);
+                // While searching, matches are always open; otherwise the
+                // user's own toggles win, then the filter's auto-open.
+                var open = q ? autoOpen : ((key in userState) ? userState[key] : autoOpen);
+                row.style.display = visible ? '' : 'none';
+                row.setAttribute('aria-expanded', (visible && open) ? 'true' : 'false');
+                kids.forEach(function (k) {
+                    var name = k.getAttribute('data-name');
+                    var isMatch = !q || (name !== null && name.indexOf(q) !== -1);
+                    k.hidden = !(visible && open && isMatch);
+                });
+            });
+            setCards(cat || 'all');
+        }
+
+        rows.forEach(function (row) {
+            function toggle() {
+                var open = row.getAttribute('aria-expanded') === 'true';
+                userState[row.getAttribute('data-cat')] = !open;
+                apply();
+            }
+            row.addEventListener('click', toggle);
+            row.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+            });
+        });
+        sel.addEventListener('change', function () { userState = {}; apply(); });
+        if (search) { search.addEventListener('input', apply); }
+        apply();
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
+</script>
 {% endblock %}
