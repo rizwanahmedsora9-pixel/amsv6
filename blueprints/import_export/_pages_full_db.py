@@ -10,10 +10,9 @@ a whole accounting database):
 
     POST /import_export/full_db_import
         Uploads a snapshot (.amsdb / .db) and performs a full sync:
-        the current database is backed up automatically, EVERY data row of the
-        current database is deleted first ("clean all data in AMS"),
-        then every row of the uploaded file is inserted with its original
-        primary keys.  Mode 'append' instead keeps existing rows and only
+        the current database is backed up automatically, then data rows are
+        replaced using the uploaded rows and their original primary keys.
+        The target's schema and migration records are kept.  Mode 'append' instead keeps existing rows and only
         inserts new primary keys.
 
     GET  /import_export/full_db_import_report/<report_name>
@@ -27,7 +26,6 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import traceback
 import uuid
 from datetime import datetime
@@ -205,7 +203,11 @@ def full_db_import():
 
     mode = (request.form.get("mode") or "clean_replace").strip().lower()
     if mode not in ("clean_replace", "append"):
-        mode = "clean_replace"
+        msg = "Invalid database import mode. Choose Full sync or Append."
+        if wants_json:
+            return _json_fail(msg)
+        flash(msg, "danger")
+        return redirect(url_for("import_export.import_export_page"))
 
     db_path = _target_db_path()
     if not db_path or not Path(db_path).exists():
@@ -223,7 +225,6 @@ def full_db_import():
     file.save(upload_path)
 
     report_name = None
-    report_meta = {}
     try:
         # require_sidecar=False: a browser upload is a single file by nature,
         # so it cannot carry the .report.txt sidecar.  The UI path keeps its
@@ -261,7 +262,6 @@ def full_db_import():
             "unique_indexes_lost": lost_names,
             "unique_indexes_recreated": relaxed_recreated,
         }
-        report_meta = meta
         # The import itself is already committed here — saving the
         # JSON report is bookkeeping and must never turn a completed
         # import into an error banner.
@@ -313,10 +313,10 @@ def full_db_import():
             ]
             return jsonify(_full_db_payload(
                 True,
-                f"Full database import complete ({mode}) — every user, setting "
-                f"and row in the file was restored ({meta['rows_inserted']} rows "
-                f"across {meta['tables_shared']} tables). The import was verified "
-                "end-to-end; nothing was loaded partially.",
+                f"Full database import complete ({mode}) — inserted "
+                f"{meta['rows_inserted']} rows across {meta['tables_shared']} shared tables. "
+                "SQLite integrity and foreign keys were verified. The target schema "
+                "and migration history were kept.",
                 inserted=meta["rows_inserted"],
                 tables=meta["tables_shared"],
                 table_results=table_results,

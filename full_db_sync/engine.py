@@ -6,20 +6,19 @@ Design notes
   small metadata table (``__ams_full_db_meta__``).  It is produced with the
   SQLite online-backup API, so it is consistent even when the source database
   is in WAL mode (pending ``-wal`` transactions are included automatically).
-* **Import** performs a *clean-and-copy*: every data row of the target is
-  deleted first (schema, indexes and app-level seed/metadata stay), then every
-  row of the source file is inserted with its original primary keys, so all
-  foreign-key relationships stay internally consistent.  Users are copied too
-  (full replace) — that is the documented behaviour of ``clean_replace``.
-* The engine never guesses values and never needs pandas/openpyxl.  It is used
-  by both the Flask UI routes and the command-line tools.
+* **Import** performs a *clean-and-copy*: target data rows (including users)
+  are replaced with source rows using their original primary keys. The target
+  schema and migration history remain authoritative. Known legacy fields are
+  filled explicitly; unsupported schema gaps are refused.
+* The engine needs neither pandas nor openpyxl. It is used by both the Flask
+  UI routes and the command-line tools.
 """
 from __future__ import annotations
 
-import logging
-
 import json
+import logging
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
@@ -31,6 +30,22 @@ AMS_META_TABLE = "__ams_full_db_meta__"
 SNAPSHOT_SPEC_VERSION = "1"
 TOOL_NAME = "full_db_sync"
 NON_DATA_TABLES = (AMS_META_TABLE,)
+# These describe migrations applied to the physical schema, not imported data.
+# Keep them in exports for verification, but never overwrite the target's copy.
+_SCHEMA_STATE_TABLES = {"migration_history", "schema_version"}
+
+# Explicit compatibility with pre-0016/0017 AMS snapshots. Do not silently
+# accept other missing fields: a NULL/default could change business meaning.
+_ENTRY_SEQ_TABLES = {
+    "direct_sale", "booking", "payment", "supplier_payment", "material_return",
+    "grn", "pending_bill", "account_transaction",
+}
+_LEGACY_DEFAULTS = {
+    "booking_item": {"cancelled_qty": 0},
+    "material_return": {"source_sale_id": None, "source_bill_no": None,
+                        "voided_with_sale": 0},
+    "user_login_session": {"last_active_at": None, "activity_state": None},
+}
 
 # Minimal "is this an AMS business database?" probe.  The AMS v4.4 schema
 # always contains these three tables.
@@ -101,8 +116,8 @@ def _integrity_detail(con: sqlite3.Connection):
 def _fk_violations(con: sqlite3.Connection) -> List[tuple]:
     try:
         return con.execute("PRAGMA foreign_key_check").fetchall()
-    except sqlite3.OperationalError:
-        return []
+    except sqlite3.OperationalError as exc:
+        raise FullDbSyncError(f"Cannot verify foreign keys: {exc}") from exc
 
 
 def _looks_like_ams(con: sqlite3.Connection):
@@ -247,7 +262,7 @@ def backup_database(db_path: Path, backup_dir=None,
         return None
     directory = Path(backup_dir) if backup_dir else db_path.parent
     directory.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     out = directory / f"{prefix}{db_path.stem}_{stamp}.db"
     src = _open(db_path, mode="ro")
     dst = sqlite3.connect(str(out), timeout=60, isolation_level=None)
@@ -505,18 +520,17 @@ def import_snapshot(source_path, target_db_path, *, mode: str = "clean_replace",
     """Load the full data of *source_path* into *target_db_path*.
 
     ``mode="clean_replace"``  (default; the documented full sync)
-        Every data row of the target is deleted first, then all rows of the
-        source are inserted with their original primary keys.  Users are
-        copied too (the target becomes an exact data copy of the source).
+        Target data rows are replaced with source rows using their original
+        primary keys. Users are copied unless ``include_users=False``.
     ``mode="append"``
         Source rows are inserted, skipping any primary key that already
         exists in the target.
 
-    The target schema is authoritative.  Tables present in the target but
-    absent from the source stay empty; columns present in the target but
-    absent from the source abort the import with a clear message (export a
-    snapshot from the same schema generation instead).  An automatic backup
-    of the target is always taken first unless ``backup_target=False``.
+    The target schema and its migration history are authoritative. Known
+    legacy columns are filled explicitly, and legacy entry numbers are
+    assigned in ID order. Unrecognized missing columns or populated source
+    tables/columns that cannot be copied are refused. An automatic backup
+    is taken before loading unless ``backup_target=False``.
 
     ``require_sidecar`` (default True) — plain ``.db`` sources must carry the
     ``RESULT: PASS`` sidecar written by the AMS migration tool
@@ -572,9 +586,9 @@ def import_snapshot(source_path, target_db_path, *, mode: str = "clean_replace",
     if mode not in ("clean_replace", "append"):
         raise FullDbSyncError(f"Unknown import mode: {mode}")
 
-    # ---- Validate the source file ---------------------------------------
-    scon = _open(src, mode="ro")
-    try:
+    with closing(_open(src, mode="ro")) as scon, closing(_open(tgt, mode="rw")) as tcon:
+        # Hold a single read snapshot from validation through the copy.
+        scon.execute("BEGIN")
         ok, detail = _integrity_detail(scon)
         if not ok:
             raise FullDbSyncError(f"Source integrity check failed: {detail[:5]}")
@@ -585,49 +599,64 @@ def import_snapshot(source_path, target_db_path, *, mode: str = "clean_replace",
             )
         source_counts = table_rows(scon)
         source_meta = _read_meta(scon)
-    finally:
-        scon.close()
+        if source_meta and isinstance(source_meta.get("tables"), dict):
+            mismatched = [t for t, n in source_meta["tables"].items()
+                          if source_counts.get(t) != n]
+            if mismatched:
+                raise FullDbSyncError(
+                    f"Source row counts differ from snapshot metadata: {mismatched[:5]}"
+                )
 
-    # ---- Automatic backup of the current target --------------------------
-    backup_path = None
-    if backup_target:
-        backup_path = backup_database(
-            tgt, backup_dir=Path(backup_dir) if backup_dir else None,
-            prefix="pre_full_db_import_",
-        )
-
-    # ---- Target schema (authoritative) -----------------------------------
-    tcon = _open(tgt, mode="rw")
-    scon = _open(src, mode="ro")
-    try:
         target_tables = list_user_tables(tcon)
         if not target_tables:
             raise FullDbSyncError(
                 f"Target {tgt} has no tables — bootstrap the AMS schema first."
             )
-        if not include_users:
-            target_tables = [t for t in target_tables
-                             if t not in ("user", "user_login_session")]
-        source_set = set(source_counts) - (set() if include_users else
-                                           {"user", "user_login_session"})
+        preserved_schema_tables = sorted(_SCHEMA_STATE_TABLES.intersection(target_tables))
+        excluded = _SCHEMA_STATE_TABLES | (set() if include_users else
+                                            {"user", "user_login_session"})
+        target_tables = [t for t in target_tables if t not in excluded]
+        source_set = set(source_counts) - excluded
         shared = [t for t in target_tables if t in source_set]
         only_target = [t for t in target_tables if t not in source_set]
         only_source = sorted(source_set - set(target_tables))
+        unmapped = [t for t in only_source if source_counts[t]]
+        if unmapped:
+            raise FullDbSyncError(f"Target lacks populated source tables: {unmapped}")
         order = _fk_dependency_order(tcon, shared)
 
-        # Column compatibility: abort if the target needs columns the source
-        # does not carry (different schema generations).
+        copy_columns = {}
+        legacy_defaults = {}
+        legacy_numbered = set()
         for t in order:
-            tgt_cols = table_columns(tcon, t)
-            src_cols = table_columns(scon, t)
+            tgt_info = tcon.execute(f"PRAGMA table_info({_q(t)})").fetchall()
+            tgt_cols = [r[1] for r in tgt_info]
+            src_cols = set(table_columns(scon, t))
+            extra = sorted(src_cols - set(tgt_cols))
+            if extra and source_counts[t]:
+                raise FullDbSyncError(f"Table '{t}' has source columns absent from the target: {extra}")
             missing = [c for c in tgt_cols if c not in src_cols]
-            if missing:
+            defaults = _LEGACY_DEFAULTS.get(t, {})
+            number_rows = "entry_seq" in missing and t in _ENTRY_SEQ_TABLES and "id" in src_cols
+            allowed = set(defaults) | ({"entry_seq"} if number_rows else set())
+            unexpected = [r[1] for r in tgt_info
+                          if r[1] in missing and (r[5] or r[1] not in allowed)]
+            if unexpected:
                 raise FullDbSyncError(
-                    f"Table '{t}' in the target needs columns the source lacks: "
-                    f"{missing}. Export a fresh snapshot from the same AMS "
-                    "version, or start the target app once so its schema "
-                    "bootstrap adds the columns."
+                    f"Table '{t}' in the target needs unsupported columns the source lacks: "
+                    f"{unexpected}. Use a compatible AMS snapshot or migrate it first."
                 )
+            copy_columns[t] = [c for c in tgt_cols if c in src_cols]
+            if fill := {c: defaults[c] for c in missing if c in defaults}:
+                legacy_defaults[t] = fill
+            if number_rows:
+                legacy_numbered.add(t)
+
+        backup_path = None
+        if backup_target:
+            backup_path = backup_database(tgt, backup_dir=backup_dir, prefix="pre_full_db_import_")
+            if backup_path is None:
+                raise FullDbSyncError("Cannot import without a backup of the target database.")
 
         # ---- Unique-index relaxation -------------------------------------
         # Target UNIQUE indexes whose column set the source data violates are
@@ -675,57 +704,51 @@ def import_snapshot(source_path, target_db_path, *, mode: str = "clean_replace",
                 tcon.execute(f'DROP INDEX IF EXISTS {_q(idx["name"])}')
 
             if mode == "clean_replace":
-                wipe_tables = list_user_tables(tcon)
-                if not include_users:
-                    wipe_tables = [t for t in wipe_tables
-                                   if t not in ("user", "user_login_session")]
-                wipe_order = _fk_dependency_order(tcon, wipe_tables)
+                wipe_order = _fk_dependency_order(tcon, target_tables)
                 for t in reversed(wipe_order):
                     deleted[t] = _delete_one(tcon, t)
-                try:
-                    tcon.execute("DELETE FROM sqlite_sequence")
-                except sqlite3.OperationalError:
-                    pass
+                # SQLite tracks AUTOINCREMENT per table. Do not reset any
+                # tables intentionally preserved (e.g. --keep-users).
+                if tcon.execute("SELECT 1 FROM sqlite_master WHERE name='sqlite_sequence'").fetchone():
+                    tcon.executemany("DELETE FROM sqlite_sequence WHERE name=?",
+                                     [(t,) for t in target_tables])
 
             for t in order:
-                cols = table_columns(tcon, t)  # == src cols for shared tables
-                col_sql = ", ".join(_q(c) for c in cols)
-                marks = ", ".join("?" for _ in cols)
+                cols = copy_columns[t]
+                defaults = legacy_defaults.get(t, {})
+                numbered = t in legacy_numbered
+                insert_cols = cols + list(defaults) + (["entry_seq"] if numbered else [])
+                col_sql = ", ".join(_q(c) for c in insert_cols)
+                marks = ", ".join("?" for _ in insert_cols)
                 ins_sql = f"INSERT INTO {_q(t)} ({col_sql}) VALUES ({marks})"
-                sel_sql = f"SELECT {col_sql} FROM {_q(t)}"
+                sel_sql = f"SELECT {', '.join(_q(c) for c in cols)} FROM {_q(t)}"
+                sequence = 0
+                if numbered:
+                    sel_sql += ' ORDER BY "id"'
+                    sequence = tcon.execute(
+                        f'SELECT COALESCE(MAX(entry_seq), 0) FROM {_q(t)}'
+                    ).fetchone()[0]
+                pk = [r[1] for r in tcon.execute(f'PRAGMA table_info({_q(t)})') if r[5] > 0]
+                existing = set()
+                pk_idx = []
+                if mode == "append" and pk:
+                    existing = set(tcon.execute(
+                        f'SELECT {", ".join(_q(c) for c in pk)} FROM {_q(t)}'))
+                    pk_idx = [cols.index(c) for c in pk]
                 n = 0
                 cur = scon.execute(sel_sql)
-                if mode == "clean_replace":
-                    while True:
-                        batch = cur.fetchmany(_BATCH_SIZE)
-                        if not batch:
-                            break
-                        tcon.executemany(ins_sql, batch)
-                        n += len(batch)
-                else:
-                    # Append: skip primary keys that already exist.
-                    pk = [r[1] for r in tcon.execute(f'PRAGMA table_info({_q(t)})')
-                          if r[5] > 0]
-                    if pk:
-                        existing = {tuple(r) for r in tcon.execute(
-                            f'SELECT {", ".join(_q(c) for c in pk)} FROM {_q(t)}')}
-                        pk_idx = [cols.index(c) for c in pk]
-                        while True:
-                            batch = cur.fetchmany(_BATCH_SIZE)
-                            if not batch:
-                                break
-                            keep = [row for row in batch
-                                    if tuple(row[i] for i in pk_idx) not in existing]
-                            if keep:
-                                tcon.executemany(ins_sql, keep)
-                                n += len(keep)
-                    else:
-                        while True:
-                            batch = cur.fetchmany(_BATCH_SIZE)
-                            if not batch:
-                                break
-                            tcon.executemany(ins_sql, batch)
-                            n += len(batch)
+                fill = tuple(defaults.values())
+                while batch := cur.fetchmany(_BATCH_SIZE):
+                    if existing:
+                        batch = [row for row in batch if tuple(row[i] for i in pk_idx) not in existing]
+                    if numbered:
+                        batch = [row + fill + (sequence + offset,)
+                                 for offset, row in enumerate(batch, start=1)]
+                        sequence += len(batch)
+                    elif fill:
+                        batch = [row + fill for row in batch]
+                    tcon.executemany(ins_sql, batch)
+                    n += len(batch)
                 inserted[t] = n
 
             # ---- Verify inside the same transaction ----------------------
@@ -820,19 +843,13 @@ def import_snapshot(source_path, target_db_path, *, mode: str = "clean_replace",
                 tcon.execute("PRAGMA temp_store=DEFAULT")
             except sqlite3.OperationalError:
                 pass
-    finally:
-        try:
-            if relaxed_lost:
-                logging.getLogger("full_db_sync").warning(
-                    "Import relaxed %d unique index(es) and could not recreate "
-                    "them (source data violates them): %s",
-                    len(relaxed_lost),
-                    ", ".join(str(i.get("name")) for i in relaxed_lost),
-                )
-        except Exception:
-            pass
-        scon.close()
-        tcon.close()
+    if relaxed_lost:
+        logging.getLogger("full_db_sync").warning(
+            "Import relaxed %d unique index(es) and could not recreate "
+            "them (source data violates them): %s",
+            len(relaxed_lost),
+            ", ".join(str(i.get("name")) for i in relaxed_lost),
+        )
 
     return {
         "ok": (integrity_ok and not fk_rows and not count_mismatches),
@@ -847,6 +864,9 @@ def import_snapshot(source_path, target_db_path, *, mode: str = "clean_replace",
         "tables_shared": len(shared),
         "tables_only_target": only_target,
         "tables_only_source": only_source,
+        "schema_tables_preserved": preserved_schema_tables,
+        "legacy_columns_defaulted": legacy_defaults,
+        "legacy_entry_seq_assigned": {t: inserted[t] for t in sorted(legacy_numbered)},
         "rows_deleted": deleted,
         "rows_deleted_total": sum(deleted.values()),
         "rows_inserted": inserted,

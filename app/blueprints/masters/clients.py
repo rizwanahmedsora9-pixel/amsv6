@@ -107,9 +107,8 @@ def clients():
 @bp.route('/clients/<int:client_id>/modals')
 @login_required
 def client_modals(client_id):
-    """Render one active client's edit/transfer dialogs on demand."""
+    """Render one active client's edit dialog on demand."""
     client = Client.query.filter(Client.id == client_id, Client.is_active == True).first_or_404()
-    active_clients = Client.query.filter(Client.is_active == True).order_by(Client.name.asc()).all()
     categories = ensure_client_category_options()
-    return render_template('_client_modals.html', c=client, active_clients=active_clients, categories=categories)
+    return render_template('_client_modals.html', c=client, categories=categories)
 

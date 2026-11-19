@@ -28,6 +28,7 @@
                 <div id="clientLedgerNameDisplay" class="text-info small mt-1 fw-bold"></div>
             </div>
             <button class="btn btn-outline-warning btn-sm" type="submit">Search</button>
+            {% if search or category %}<a class="btn btn-outline-secondary btn-sm" href="{{ url_for('clients') }}">Clear filters</a>{% endif %}
         </form>
         <a href="/" class="btn btn-outline-light btn-sm fw-bold"><i class="bi bi-arrow-left me-1"></i> Back</a>
         <a href="/export_clients" class="btn btn-outline-success btn-sm fw-bold"><i class="bi bi-file-earmark-excel"></i> Export</a>
@@ -140,6 +141,7 @@ function addPageInput(containerId, value = '') {
     <h4 class="text-info fw-bold mb-3 d-flex align-items-center gap-2">
         <span><i class="bi bi-person-check me-2"></i>Active Clients</span>
         <span class="badge bg-info text-dark">Filtered: {{ active_pagination.total }}</span>
+        <a class="btn btn-outline-secondary btn-sm" href="#inactive-clients">Inactive clients ({{ inactive_pagination.total }})</a>
     </h4>
     <div class="card border-0 shadow-sm" style="background: #1e293b; border: 2px solid #475569 !important; border-radius: 15px; overflow: hidden;">
         <div class="table-responsive">
@@ -214,8 +216,7 @@ function addPageInput(containerId, value = '') {
                         <td class="text-end pe-4">
                             <div class="btn-group btn-group-sm">
                                 <a href="/ledger/{{ c.id }}" class="btn btn-outline-info border-2 rounded-start-pill" title="View Ledger"><i class="bi bi-journal-text"></i></a>
-                                <button class="btn btn-outline-warning border-2" data-client-modal-url="{{ url_for('client_modals', client_id=c.id) }}" data-client-modal="edit" title="Edit"><i class="bi bi-pencil"></i></button>
-                                <button class="btn btn-outline-light border-2" data-client-modal-url="{{ url_for('client_modals', client_id=c.id) }}" data-client-modal="transfer" title="Transfer Data"><i class="bi bi-arrow-right-circle"></i></button>
+                                <button class="btn btn-outline-warning border-2" data-client-modal-url="{{ url_for('client_modals', client_id=c.id) }}" title="Edit"><i class="bi bi-pencil"></i></button>
                                 <form action="/delete_client/{{ c.id }}" method="POST" class="d-inline" onsubmit="return confirm('Suspend client {{ c.name }}?')">
                                     <button type="submit" class="btn btn-outline-danger border-2 rounded-end-pill" title="Suspend"><i class="bi bi-pause-circle"></i></button>
                                 </form>
@@ -248,11 +249,12 @@ function addPageInput(containerId, value = '') {
 </div>
 
 <!-- Inactive Clients Section -->
-<div class="mb-5">
+<div class="mb-5" id="inactive-clients">
     <h4 class="text-secondary fw-bold mb-3 d-flex align-items-center gap-2">
         <span><i class="bi bi-person-x me-2"></i>Inactive Clients</span>
         <span class="badge bg-secondary text-white">Filtered: {{ inactive_pagination.total }}</span>
     </h4>
+    <p class="small text-white-50 mb-3">Suspended clients are hidden from new transaction lists. Their existing ledgers are still available here. Transfer and Reclaim are paused to protect ledger history.</p>
     <div class="card border-0 shadow-sm" style="background: #0f172a; border: 2px solid #334155 !important; border-radius: 15px; overflow: hidden; opacity: 0.85;">
         <div class="table-responsive">
             <table class="table table-dark table-hover align-middle mb-0">
@@ -301,12 +303,9 @@ function addPageInput(containerId, value = '') {
                         <td class="text-white-50 small">{{ c.phone or '---' }}</td>
                         <td class="text-end pe-4">
                             {% if c.transferred_to_id %}
-                            <form action="/reclaim_client/{{ c.id }}" method="POST" class="d-inline">
-                                <button type="submit" class="btn btn-outline-success btn-sm border-2 rounded-pill shadow-sm me-1" title="Reclaim Data" onclick="return confirm('Reclaim data for {{ c.name }}?')">
-                                    <i class="bi bi-arrow-left-circle"></i> Reclaim
-                                </button>
-                            </form>
+                            <span class="badge bg-secondary" title="Ask an administrator to review the old transfer">Legacy transfer</span>
                             {% endif %}
+                            <a href="{{ url_for('financial_ledger', client_id=c.id) }}" class="btn btn-outline-info btn-sm" title="View Ledger"><i class="bi bi-journal-text"></i><span class="visually-hidden">View Ledger</span></a>
                             <form action="{{ url_for('client_toggle_active', client_id=c.id) }}" method="POST" class="d-inline" onsubmit="return confirm('Activate client {{ c.name }}?')">
                                 <button type="submit" class="btn btn-outline-success btn-sm border-2 rounded-pill shadow-sm">
                                     <i class="bi bi-play-circle"></i>
@@ -415,13 +414,12 @@ function addPageInput(containerId, value = '') {
     </div>
 </div>
 <script>
-function loadClientModal(url, mode) {
-    const isTransfer = mode === 'transfer';
+function loadClientModal(url) {
     AMSLazyModal.load({
         hostId: 'lazyClientModalHost',
         url: url,
-        selector: `[id^="${isTransfer ? 'transferCModal' : 'editCModal'}"]`,
-        label: isTransfer ? 'Loading transfer form…' : 'Loading client form…',
+        selector: '[id^="editCModal"]',
+        label: 'Loading client form…',
         onReady: function (modalEl) {
             const editForm = modalEl.querySelector('form');
             if (editForm) {
@@ -437,7 +435,7 @@ document.addEventListener('click', function(event) {
     const button = event.target.closest('[data-client-modal-url]');
     if (!button) return;
     event.preventDefault();
-    loadClientModal(button.dataset.clientModalUrl, button.dataset.clientModal);
+    loadClientModal(button.dataset.clientModalUrl);
 });
 </script>
 {% endblock %}

@@ -4,17 +4,9 @@ from ._common import *  # noqa
 @import_export_bp.route('/')
 @login_required
 def import_export_page():
-    # ===== PANDAS DEPENDENCY CHECK =====
-    if not _validate_pandas_installed():
-        flash(
-            'CRITICAL: pandas library is not installed. '
-            'Run: pip install pandas>=2.3.3. '
-            'Import/export functionality is disabled.',
-            'danger'
-        )
-        return render_template('import_export_new.html', pandas_unavailable=True)
-    # ===== END DEPENDENCY CHECK =====
-    
+    # Only some workbook tools need pandas; SQLite snapshots do not.
+    pandas_unavailable = not _validate_pandas_installed()
+
     full_raw_import_enabled = str(
         os.environ.get('FULL_RAW_IMPORT_ENABLED', current_app.config.get('FULL_RAW_IMPORT_ENABLED', '0'))
     ).strip().lower() in ['1', 'true', 'on', 'yes']
@@ -46,6 +38,7 @@ def import_export_page():
     ]
     return render_template(
         'import_export_new.html',
+        pandas_unavailable=pandas_unavailable,
         full_raw_import_enabled=full_raw_import_enabled,
         full_raw_import_report=full_raw_import_report,
         tenants=tenants,

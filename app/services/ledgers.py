@@ -102,11 +102,9 @@ def client_material_entry_filter(client):
     The on-screen Material Ledger and the printed/PDF statement must agree, so
     both call this instead of each writing their own ``or_`` clause.
     """
-    client_name_norm = (client.name or '').strip().lower()
-    return or_(
-        Entry.client_code == client.code,
-        func.lower(func.trim(Entry.client)) == client_name_norm,
-    )
+    from app.services.client_identity import client_reference_filter
+
+    return client_reference_filter(Entry.client_code, Entry.client, code=client.code, name=client.name)
 
 
 def client_material_summary(client):

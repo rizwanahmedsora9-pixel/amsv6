@@ -18,10 +18,10 @@
     <div class="alert alert-info d-flex gap-3 align-items-start mb-4" role="status">
         <i class="bi bi-shield-check fs-4"></i>
         <div>
-            <div class="fw-bold">Safe, row-by-row restore</div>
+            <div class="fw-bold">Verified database restore</div>
             <div class="small mt-1">
-                Compatible rows are saved even when another row has a bad value. Missing sheets, unknown columns,
-                duplicate rows, and rejected values are identified by table and Excel row so you can correct only the problem data.
+                Snapshot imports are all-or-nothing. AMS fills in known older fields, keeps the current schema,
+                and rolls back the entire import if verification fails.
             </div>
         </div>
     </div>
@@ -71,12 +71,13 @@
                     {% if full_db_sync_enabled %}
                     <p class="text-white-50 mb-3">
                         Upload a <code>.amsdb</code> / <code>.db</code> snapshot exported by AMS. The current database is backed
-                        up automatically, then every existing row is removed and the file's data is copied in fully (users included).
+                        up automatically. Full sync replaces existing data, including users, but keeps the current schema and its migration history.
                     </p>
                     <form method="POST"
                           action="{{ url_for('import_export.full_db_import') }}"
                           enctype="multipart/form-data"
                           class="ui-form d-flex flex-column flex-grow-1">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
                         <div class="ui-field mb-3">
                             <label for="fullDbFile" class="ui-label">Snapshot file (.amsdb / .db)</label>
                             <input id="fullDbFile" type="file" name="file" class="form-control"
@@ -91,8 +92,8 @@
                         </div>
                         <div class="alert alert-warning small py-2 mb-3">
                             <i class="bi bi-exclamation-triangle me-1"></i>
-                            <strong>Full sync removes every row</strong> — clients, sales, users — from this app before loading the
-                            uploaded file. The old database is saved as a backup first (in <code>instance/migration/</code>) so you can
+                            <strong>Full sync replaces existing business data and users with those from the snapshot.</strong>
+                            The old database is saved as a backup first (in <code>instance/migration/</code>) so you can
                             restore it at any time.
                         </div>
                         <button type="submit" class="btn btn-warning w-100 mt-auto"
@@ -136,6 +137,12 @@
             </section>
         </div>
     </div>
+
+    {% if pandas_unavailable %}
+    <div class="alert alert-warning small" role="status">
+        Some Excel import tools require pandas. Database snapshot import and export do not.
+    </div>
+    {% endif %}
 
     <!-- ===== Granular (per-module) backup / restore ===== -->
     <div class="row g-4 align-items-stretch mb-2">
@@ -367,8 +374,7 @@ function confirmFullDbImport(btn) {
     const mode = form.querySelector('select[name="mode"]');
     if (mode && mode.value === 'clean_replace') {
         return confirm(
-            'FULL SYNC — every existing row in this app database will be DELETED first ' +
-            '(clients, sales, users, everything), then the uploaded snapshot will be loaded fully. ' +
+            'FULL SYNC — the uploaded snapshot will REPLACE existing data, including clients, sales, and users. ' +
             'An automatic backup of the current database is saved before this runs. Continue?'
         );
     }
