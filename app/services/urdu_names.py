@@ -46,6 +46,7 @@ _WORDS = {
     'haroon': 'ہارون', 'hasan': 'حسن', 'hassan': 'حسن', 'husain': 'حسین',
     'hussain': 'حسین', 'ibrahim': 'ابراہیم', 'idrees': 'ادریس',
     'iftikhar': 'افتخار', 'ilyas': 'الیاس', 'imran': 'عمران',
+    'irfan': 'عرفان',
     'iqbal': 'اقبال', 'ismail': 'اسماعیل', 'javed': 'جاوید',
     'junaid': 'جنید', 'kamran': 'کامران', 'kashif': 'کاشف',
     'mahmood': 'محمود', 'majeed': 'مجید', 'masood': 'مسعود',
@@ -91,6 +92,7 @@ _WORDS = {
     'kohat': 'کوہاٹ', 'pakistan': 'پاکستان',
     # ---- Walk-in / ledger vocabulary seen in client and driver names ----
     'open': 'اوپن', 'khata': 'کھاتہ', 'cash': 'کیش', 'paid': 'پیڈ',
+    'outsider': 'بیرونی',
     'sale': 'سیل', 'credit': 'کریڈٹ', 'advance': 'ایڈوانس', 'rent': 'کرایہ',
     'return': 'ریٹرن', 'due': 'ڈیو', 'general': 'جنرل', 'customer': 'کسٹمر',
     'walking': 'واکنگ', 'site': 'سائٹ', 'shop': 'شاپ', 'store': 'اسٹور',
