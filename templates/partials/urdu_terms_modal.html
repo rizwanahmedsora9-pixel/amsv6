@@ -1,0 +1,390 @@
+{# ===========================================================================
+   Urdu receipt print/download options modal.
+   Opened when the user clicks "Urdu Print" or "Urdu PDF" on a bill view.
+   Offers the page map (every mark on the sheet, in page order), the Terms &
+   Conditions choice and the number of copies.  Only Urdu receipts get this
+   dialog — English receipts link straight to PDF/print as before.
+   =========================================================================== #}
+<div class="modal fade" id="urduTermsModal" tabindex="-1" aria-labelledby="urduTermsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-dark border-warning">
+            <div class="modal-header border-warning">
+                <h5 class="modal-title text-warning fw-bold" id="urduTermsModalLabel">
+                    <i class="bi bi-file-earmark-text me-2"></i>Urdu Receipt — Print Options
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-white-50 small">
+                <p class="mb-3 fw-bold text-white">
+                    <bdi dir="rtl">شرائط و ضوابط:</bdi> Display Terms &amp; Conditions on this Urdu receipt?
+                </p>
+
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="radio" name="urduTc" id="urduTcYes" value="1" checked>
+                    <label class="form-check-label text-white fw-bold" for="urduTcYes">
+                        <i class="bi bi-check-circle text-success me-1"></i> Yes — show terms and conditions
+                    </label>
+                </div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="radio" name="urduTc" id="urduTcNo" value="0">
+                    <label class="form-check-label" for="urduTcNo">
+                        <i class="bi bi-dash-circle text-muted me-1"></i> No — print without terms
+                    </label>
+                </div>
+
+                <div class="mb-3 border rounded p-2 bg-dark-subtle">
+                    <div class="small text-warning fw-bold text-uppercase mb-2">
+                        <i class="bi bi-copy me-1"></i> Copies
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="urduCopies" id="urduCopies2" value="2">
+                        <label class="form-check-label text-white fw-bold" for="urduCopies2">
+                            <bdi dir="rtl">کاربن کاپی</bdi> — 2 copies on one A4 (carbon copy)
+                        </label>
+                        <div class="text-white-50 small">
+                            <bdi dir="rtl">اصل</bdi> for the customer on the right, <bdi dir="rtl">نقل</bdi> for the office on the left.
+                        </div>
+                    </div>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="radio" name="urduCopies" id="urduCopies1" value="1" checked>
+                        <label class="form-check-label text-white-50" for="urduCopies1">
+                            <i class="bi bi-file-earmark me-1"></i> Single copy — one A5 sheet
+                        </label>
+                    </div>
+                </div>
+
+                <div class="mb-3 border rounded p-2 bg-dark-subtle">
+                    <div class="small text-warning fw-bold text-uppercase mb-1">
+                        <i class="bi bi-arrow-left-right me-1"></i> Alternative material name
+                    </div>
+                    <div class="text-white-50 small mb-2">
+                        Only matters when an alternative material was delivered against a booking.
+                        Changes the printed name only.
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="urduAltName" id="urduAltBooked" value="booked">
+                        <label class="form-check-label text-white" for="urduAltBooked">
+                            Booked item name only
+                        </label>
+                    </div>
+                    <div class="form-check mt-1">
+                        <input class="form-check-input" type="radio" name="urduAltName" id="urduAltDelivered" value="delivered">
+                        <label class="form-check-label text-white" for="urduAltDelivered">
+                            Delivered item name only
+                        </label>
+                    </div>
+                    <div class="form-check mt-1">
+                        <input class="form-check-input" type="radio" name="urduAltName" id="urduAltBoth" value="both" checked>
+                        <label class="form-check-label text-white fw-bold" for="urduAltBoth">
+                            Both — delivered <bdi dir="rtl">(بجائے booked)</bdi>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="urduTcOptions" class="mb-3 border rounded p-2 bg-dark-subtle">
+                    <div class="small text-warning fw-bold text-uppercase mb-2">
+                        <i class="bi bi-menu-button-wide me-1"></i> Choose terms to display (Urdu receipt only)
+                    </div>
+                    <div class="list-group list-group-flush small">
+                        {% for term in terms or [] %}
+                        <div class="list-group-item bg-dark text-white border-secondary py-2">
+                            <input class="form-check-input mt-1" type="checkbox" name="urduTcIds" value="{{ term.id }}"
+                                   id="urduTc-{{ term.id }}" checked>
+                            <label class="form-check-label fw-bold d-block mb-1" for="urduTc-{{ term.id }}">
+                                {{ term.title }}
+                            </label>
+                            {% if term.content_ur %}
+                            <div class="text-white-75"><bdi dir="rtl">{{ term.content_ur }}</bdi></div>
+                            {% endif %}
+                        </div>
+                        {% else %}
+                        <div class="list-group-item bg-dark text-white-50 border-secondary py-2">
+                            No terms configured yet — add them in Settings &rarr; Terms &amp; Conditions.
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="mb-3 border rounded p-2 bg-dark-subtle">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-1">
+                        <div class="small text-warning fw-bold text-uppercase">
+                            <i class="bi bi-map me-1"></i> Page map — tick what prints
+                        </div>
+                        <div class="btn-group btn-group-sm">
+                            <button type="button" class="btn btn-outline-light btn-sm py-0" id="urduMapAll">Show all</button>
+                            <button type="button" class="btn btn-outline-light btn-sm py-0" id="urduMapNone">Hide all</button>
+                        </div>
+                    </div>
+                    <div class="text-white-50 small mb-2">
+                        Every mark on the receipt is listed in page order and is on by default.
+                        Untick anything to leave it off this receipt only.
+                    </div>
+                    <div class="pe-1" style="max-height:45vh; overflow-y:auto;">
+                        {% set section_groups = [
+                            ('1 · Header', [
+                                ('qr', 'QR code', 'بارکوڈ'),
+                                ('company', 'Shop name', 'دکان کا نام'),
+                                ('address', 'Address', 'پتہ'),
+                                ('proprietor', 'Proprietor', 'پروپرائٹر'),
+                                ('phones', 'Phone numbers', 'فون'),
+                                ('note', 'Shop note', 'سامان کی معلومات')]),
+                            ('2 · Date / time strip', [
+                                ('meta_time', 'Time', 'وقت'),
+                                ('meta_date', 'Date', 'تاریخ'),
+                                ('meta_type', 'Type', 'قسم'),
+                                ('meta_bill', 'Bill number', 'بل نمبر')]),
+                            ('3 · Client panel', [
+                                ('party', 'Client name', 'گاہک'),
+                                ('ref', 'Reference / phone', 'حوالہ'),
+                                ('code', 'Client code', 'کوڈ'),
+                                ('delivery', 'Delivery Person', 'ڈیلیوری پرسن'),
+                                ('account', 'Account / bank', 'اکاؤنٹ'),
+                                ('method', 'Payment method', 'ادائیگی')]),
+                            ('4 · Items table', [
+                                ('items', 'Items table', 'آئٹمز کی فہرست'),
+                                ('items_title', 'Heading', 'ٹرانزیکشن کی تفصیلات'),
+                                ('items_note', 'Prices note', 'قیمتیں روپے میں'),
+                                ('col_index', 'No. column', 'نمبر'),
+                                ('col_name', 'Item column', 'تفصیل'),
+                                ('col_qty', 'Qty column', 'مقدار'),
+                                ('col_rate', 'Rate column', 'ریٹ'),
+                                ('col_amount', 'Amount column', 'رقم')]),
+                            ('5 · Summary box', [
+                                ('sum_total_sales', 'Total sales', 'کل فروخت'),
+                                ('prev', 'Previous balance', 'پچھلا بقایا'),
+                                ('sum_discount', 'Discount', 'رعایت'),
+                                ('sum_paid', 'Paid', 'ادا شدہ رقم'),
+                                ('sum_total', 'Total balance', 'کل بقایا رقم'),
+                                ('sum_received', 'Received', 'وصول شدہ رقم'),
+                                ('sum_balance', 'Balance after', 'بقایا رقم')]),
+                            ('6 · Booked sale summary', [
+                                ('booked_summary', 'Booked sale summary', 'بک شدہ فروخت کا خلاصہ')]),
+                            ('7 · Footer', [
+                                ('sig', 'Signature line', 'دستخط')])
+                        ] %}
+                        {% for group_name, group_items in section_groups %}
+                        {% set gi = loop.index %}
+                        <div class="mb-2">
+                            <div class="d-flex justify-content-between align-items-center border-bottom border-secondary pb-1 mb-1">
+                                <span class="small text-info fw-bold text-uppercase">{{ group_name }}</span>
+                                <label class="form-check-label small text-white-50 mb-0">
+                                    <input class="form-check-input me-1" type="checkbox"
+                                           data-urdu-group-toggle="{{ gi }}" checked> all
+                                </label>
+                            </div>
+                            <div class="row g-1">
+                                {% for key, label, urdu in group_items %}
+                                <div class="col-sm-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox"
+                                               id="urduMap-{{ key }}"
+                                               data-urdu-section="{{ key }}"
+                                               data-urdu-group="{{ gi }}" checked>
+                                        <label class="form-check-label text-white small" for="urduMap-{{ key }}">
+                                            {{ label }}
+                                            <span class="text-white-50">(<bdi dir="rtl">{{ urdu }}</bdi>)</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-light btn-sm" data-bs-dismiss="modal">
+                    <i class="bi bi-x-lg me-1"></i> Cancel
+                </button>
+                <button type="button" class="btn btn-outline-warning btn-sm fw-bold me-2" id="urduTcDownload">
+                    <i class="bi bi-file-earmark-pdf me-1"></i> Download Urdu PDF
+                </button>
+                <button type="button" class="btn btn-warning btn-sm fw-bold" id="urduTcPrint">
+                    <i class="bi bi-printer me-1"></i> Print Urdu Receipt
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+/*
+ * This partial is included from the page content block, which layout.html
+ * renders BEFORE the bootstrap bundle script tag.  Running this code at once
+ * therefore threw "bootstrap is not defined" and the exception aborted the
+ * IIFE before the [data-urdu-receipt] buttons below were wired up - the Urdu
+ * PDF / Urdu Print buttons then did nothing at all on click.  Defer to
+ * DOMContentLoaded (bootstrap is loaded by then) and degrade gracefully: if
+ * bootstrap still is not available, fall back to plain links so a click always
+ * produces a document instead of a dead button.
+ */
+(function () {
+    function init() {
+        var modalEl = document.getElementById('urduTermsModal');
+        if (!modalEl) return;
+
+        var tcYes = document.getElementById('urduTcYes');
+        var tcNo = document.getElementById('urduTcNo');
+        var tcOptions = document.getElementById('urduTcOptions');
+        var downloadBtn = document.getElementById('urduTcDownload');
+        var printBtn = document.getElementById('urduTcPrint');
+        var buttons = document.querySelectorAll('[data-urdu-receipt]');
+        var sectionBoxes = Array.from(
+            document.querySelectorAll('[data-urdu-section]')
+        );
+        var groupToggles = Array.from(
+            document.querySelectorAll('[data-urdu-group-toggle]')
+        );
+
+        // Group master switches: tick/untick a whole page area, and keep the
+        // master showing all / none / partial as its children change.
+        function groupBoxes(groupId) {
+            return sectionBoxes.filter(function (cb) {
+                return cb.dataset.urduGroup === groupId;
+            });
+        }
+        function syncGroup(groupId) {
+            var master = groupToggles.find(function (el) {
+                return el.dataset.urduGroupToggle === groupId;
+            });
+            if (!master) return;
+            var boxes = groupBoxes(groupId);
+            var on = boxes.filter(function (cb) { return cb.checked; }).length;
+            master.checked = boxes.length > 0 && on === boxes.length;
+            master.indeterminate = on > 0 && on < boxes.length;
+        }
+        function syncGroups() {
+            groupToggles.forEach(function (master) {
+                syncGroup(master.dataset.urduGroupToggle);
+            });
+        }
+        function setAllSections(checked) {
+            sectionBoxes.forEach(function (cb) { cb.checked = checked; });
+            syncGroups();
+        }
+        groupToggles.forEach(function (master) {
+            master.addEventListener('change', function () {
+                var groupId = master.dataset.urduGroupToggle;
+                groupBoxes(groupId).forEach(function (cb) {
+                    cb.checked = master.checked;
+                });
+                syncGroup(groupId);
+            });
+        });
+        sectionBoxes.forEach(function (cb) {
+            cb.addEventListener('change', function () {
+                syncGroup(cb.dataset.urduGroup);
+            });
+        });
+        var showAllBtn = document.getElementById('urduMapAll');
+        var hideAllBtn = document.getElementById('urduMapNone');
+        if (showAllBtn) {
+            showAllBtn.addEventListener('click', function () {
+                setAllSections(true);
+            });
+        }
+        if (hideAllBtn) {
+            hideAllBtn.addEventListener('click', function () {
+                setAllSections(false);
+            });
+        }
+
+        function urlFor(action) {
+            var url = action === 'print'
+                ? (printBtn.dataset.printUrl || '')
+                : (downloadBtn.dataset.downloadUrl || '');
+            if (!url) return '';
+            var sep = url.indexOf('?') === -1 ? '?' : '&';
+            return url + sep;
+        }
+
+        var hasBootstrap = typeof window.bootstrap !== 'undefined'
+            && !!window.bootstrap.Modal;
+
+        // Without bootstrap we cannot open the dialog, so make every Urdu
+        // button behave as a direct link (terms default to "show all" server
+        // side would require tc=1; omit tc so the server shows its own
+        // confirmation page, which asks the same question).
+        if (!hasBootstrap) {
+            buttons.forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    var url = btn.dataset.printUrl || btn.dataset.downloadUrl || '';
+                    if (url) { location.href = url; }
+                });
+            });
+            return;
+        }
+
+        var modal = new window.bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
+
+        tcYes.addEventListener('change', function () {
+            tcOptions.style.display = tcYes.checked ? 'block' : 'none';
+        });
+        tcNo.addEventListener('change', function () {
+            tcOptions.style.display = 'none';
+        });
+
+        function go(action) {
+            var yes = tcYes.checked;
+            var ids = Array.from(
+                tcOptions.querySelectorAll('input[name="urduTcIds"]:checked')
+            ).map(function (cb) { return cb.value; });
+
+            var base = urlFor(action);
+            if (!base) return;
+            var url = base + 'tc=' + (yes ? '1' : '0');
+            if (yes && ids.length) {
+                url += '&tc_ids=' + ids.join(',');
+            }
+            var copies = document.querySelector('input[name="urduCopies"]:checked');
+            url += '&copies=' + (copies ? copies.value : '1');
+            // Optional sheet sections: send an explicit 1/0 for each so the
+            // server never has to guess an unchecked box apart from an old
+            // link (where a missing key means "show", the approved sheet).
+            var altName = document.querySelector('input[name="urduAltName"]:checked');
+            url += '&alt_name=' + (altName ? altName.value : 'both');
+            sectionBoxes.forEach(function (cb) {
+                url += '&' + cb.dataset.urduSection + '=' +
+                       (cb.checked ? '1' : '0');
+            });
+            modal.hide();
+            location.href = url;
+        }
+
+        downloadBtn.addEventListener('click', function () { go('download'); });
+        printBtn.addEventListener('click', function () { go('print'); });
+
+        // Wire up the "Urdu Print" / "Urdu PDF" buttons on this page so they
+        // open the dialog instead of linking straight to the document.
+        buttons.forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                // Prefer the data URLs of the clicked button; keep whatever is
+                // already set when a button omits one, so a half-specified
+                // button can never wipe a working URL.
+                if (btn.dataset.downloadUrl) {
+                    downloadBtn.dataset.downloadUrl = btn.dataset.downloadUrl;
+                }
+                if (btn.dataset.printUrl) {
+                    printBtn.dataset.printUrl = btn.dataset.printUrl;
+                }
+                tcYes.checked = true;
+                tcNo.checked = false;
+                tcOptions.style.display = 'block';
+                // Nothing is remembered between receipts: every dialog starts
+                // from the full approved sheet.
+                setAllSections(true);
+                var altBoth = document.getElementById('urduAltBoth');
+                if (altBoth) { altBoth.checked = true; }
+                modal.show();
+            });
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
+</script>

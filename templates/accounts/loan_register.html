@@ -1,0 +1,656 @@
+{% extends "layout.html" %}
+{% block title %}Loan Register{% endblock %}
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+      <h2 class="mb-1"><i class="bi bi-journal-check me-2"></i>Loan Register</h2>
+      <div class="text-muted">Two-way principal register: track loans taken from parties, loans given to parties, recoveries, and repayments. Principal movements never affect Profit &amp; Loss.</div>
+    </div>
+    <a class="btn btn-outline-secondary" href="{{ url_for('accounts.dashboard') }}"><i class="bi bi-arrow-left me-1"></i>Accounts</a>
+  </div>
+
+  <div class="alert alert-info mb-3">
+    <strong>Principal only &amp; two-way balances.</strong>
+    <span class="ms-1">Positive (<code>+</code>) means <strong>We Owe Party</strong> (payable); negative (<code>-</code>) means <strong>Party Owes Us</strong> (receivable). Balances can cross zero freely in either direction and update Cash/Bank without touching Profit &amp; Loss.</span>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-4">
+      <div class="card h-100 border-danger-subtle">
+        <div class="card-body py-3">
+          <div class="small text-muted fw-semibold text-uppercase">We Owe Parties (Payable +)</div>
+          <div class="fs-4 fw-bold text-danger mt-1">Rs. {{ '{:,.2f}'.format((total_we_owe_minor / 100)|float) }}</div>
+          <div class="small text-muted">Sum of positive loan balances</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card h-100 border-info-subtle">
+        <div class="card-body py-3">
+          <div class="small text-muted fw-semibold text-uppercase">Parties Owe Us (Receivable -)</div>
+          <div class="fs-4 fw-bold text-info mt-1">Rs. {{ '{:,.2f}'.format((total_owes_us_minor / 100)|float) }}</div>
+          <div class="small text-muted">Sum of negative (lent) balances</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-body py-3">
+          <div class="small text-muted fw-semibold text-uppercase">Net Loan Position</div>
+          <div class="fs-4 fw-bold mt-1">
+            {% if net_loan_position_minor > 0 %}
+              <span class="text-danger">+Rs. {{ '{:,.2f}'.format((net_loan_position_minor / 100)|float) }}</span>
+              <span class="badge text-bg-danger ms-1 fs-6 align-middle">Net Payable</span>
+            {% elif net_loan_position_minor < 0 %}
+              <span class="text-info">-Rs. {{ '{:,.2f}'.format(((-net_loan_position_minor) / 100)|float) }}</span>
+              <span class="badge text-bg-info ms-1 fs-6 align-middle">Net Receivable</span>
+            {% else %}
+              <span>Rs. 0.00</span>
+              <span class="badge text-bg-secondary ms-1 fs-6 align-middle">Settled</span>
+            {% endif %}
+          </div>
+          <div class="small text-muted">{{ parties|length }} loan part{{ 'ies' if parties|length != 1 else 'y' }} registered</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-xl-4">
+      <div class="card h-100">
+        <div class="card-header fw-bold">Add a loan party</div>
+        <div class="card-body">
+          <form method="post" action="{{ url_for('accounts.add_loan_party') }}" class="vstack gap-2">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token or '' }}">
+            <label class="form-label mb-0" for="loanPartyName">Loan party name</label>
+            <input class="form-control" id="loanPartyName" name="name" maxlength="160" placeholder="Person or business name" required>
+
+            <div class="row g-2 mt-1">
+              <div class="col-sm-6">
+                <label class="form-label mb-0" for="openingPrincipal">Opening balance (Rs.)</label>
+                <input class="form-control" id="openingPrincipal" name="opening_principal" type="number" step="0.01" value="0" placeholder="e.g. 50000 or -50000">
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label mb-0" for="openingDirection">Direction</label>
+                <select class="form-select" id="openingDirection" name="opening_direction">
+                  <option value="we_owe">We Owe Party (+ Payable)</option>
+                  <option value="owes_us">Party Owes Us (- Receivable)</option>
+                </select>
+              </div>
+            </div>
+            <div class="small" id="addOpeningPreview"></div>
+            <div class="small text-muted">Enter a positive or negative (<code>-</code>) amount, or choose the direction above. Does not create a cash movement.</div>
+
+            <label class="form-label mb-0" for="openingDate">Opening balance as of (optional)</label>
+            <input class="form-control" id="openingDate" name="opening_date" type="date">
+            <label class="form-label mb-0" for="loanPartyNote">Note (optional)</label>
+            <textarea class="form-control" id="loanPartyNote" name="note" maxlength="500" rows="2"></textarea>
+            <button class="btn btn-primary mt-1" type="submit">Add loan party</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-xl-8">
+      <div class="card h-100">
+        <div class="card-header fw-bold">Record principal movement</div>
+        <div class="card-body">
+          <form method="post" action="{{ url_for('accounts.add_loan_movement') }}" class="row g-3">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token or '' }}">
+            <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+            <div class="col-md-6">
+              <label class="form-label" for="movementPartySelect">Loan party</label>
+              <select class="form-select" id="movementPartySelect" name="loan_party_id" required>
+                <option value="">Select loan party</option>
+                {% for party in parties if party.is_active %}
+                  {% set pbal = outstanding_minor.get(party.id, 0) %}
+                  <option value="{{ party.id }}" data-balance-minor="{{ pbal }}">
+                    {{ party.name }} ·
+                    {% if pbal > 0 %}
+                      We Owe Rs. {{ '{:,.2f}'.format((pbal / 100)|float) }}
+                    {% elif pbal < 0 %}
+                      Owes Us Rs. {{ '{:,.2f}'.format(((-pbal) / 100)|float) }}
+                    {% else %}
+                      Settled (Rs. 0.00)
+                    {% endif %}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="movementTypeSelect">Movement</label>
+              <select class="form-select" id="movementTypeSelect" name="movement_type" required>
+                <option value="received">Money In — Loan Received / Recovery (+)</option>
+                <option value="repaid">Money Out — Loan Given / Repaid (-)</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="movementAmountInput">Amount (Rs.)</label>
+              <input class="form-control" id="movementAmountInput" name="amount" type="number" min="0.01" step="0.01" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="movementAccountSelect">Cash / bank account</label>
+              <select class="form-select" id="movementAccountSelect" name="cash_account_id" required>
+                <option value="">Select account</option>
+                {% for account in cash_accounts %}<option value="{{ account.id }}">{{ account.name }} · {{ account.category|upper }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="movementDateInput">Date</label>
+              <input class="form-control" id="movementDateInput" type="date" name="date_posted" value="{{ today }}" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="movementReferenceInput">Reference (optional)</label>
+              <input class="form-control" id="movementReferenceInput" name="reference" maxlength="100" placeholder="Receipt / voucher number">
+            </div>
+            <div class="col-md-8">
+              <label class="form-label" for="movementNoteInput">Note (optional)</label>
+              <input class="form-control" id="movementNoteInput" name="note" maxlength="500">
+            </div>
+            <div class="col-12 d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <button class="btn btn-success" type="submit"><i class="bi bi-check2-circle me-1"></i>Record movement</button>
+              <div class="small text-muted" id="movementBalancePreview"></div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header fw-bold d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <span>Loan parties and net balances</span>
+      <span class="small text-muted fw-normal">{{ parties|length }} loan part{{ 'ies' if parties|length != 1 else 'y' }}</span>
+    </div>
+    <div class="table-responsive"><table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Loan Party</th>
+          <th>Status</th>
+          <th class="text-end">Net Balance</th>
+          <th class="text-center">Movements</th>
+          <th>Note</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for party in parties %}
+        {% set mcount = movement_counts.get(party.id, 0) %}
+        {% set bal = outstanding_minor.get(party.id, 0) %}
+        <tr>
+          <td class="fw-semibold">
+            <a href="{{ url_for('accounts.loan_register', party_id=party.id) }}" class="text-decoration-none">{{ party.name }}</a>
+          </td>
+          <td>
+            {% if party.is_active %}
+              <span class="badge text-bg-success">Active</span>
+            {% else %}
+              <span class="badge text-bg-secondary">Inactive</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            {% if bal > 0 %}
+              <span class="fw-semibold text-danger">+Rs. {{ '{:,.2f}'.format((bal / 100)|float) }}</span>
+              <span class="badge text-bg-danger ms-1">We Owe</span>
+            {% elif bal < 0 %}
+              <span class="fw-semibold text-info">-Rs. {{ '{:,.2f}'.format(((-bal) / 100)|float) }}</span>
+              <span class="badge text-bg-info ms-1">Owes Us</span>
+            {% else %}
+              <span class="fw-semibold">Rs. 0.00</span>
+              <span class="badge text-bg-secondary ms-1">Settled</span>
+            {% endif %}
+            {% if party.opening_principal_minor %}
+              {% set op = party.opening_principal_minor %}
+              <div class="small text-muted">
+                Opening {{ '+Rs. ' if op > 0 else '-Rs. ' }}{{ '{:,.2f}'.format(((op|abs) / 100)|float) }}
+                ({{ 'We Owe' if op > 0 else 'Owes Us' }})
+                as of {{ party.opening_principal_date or 'date not recorded' }}
+              </div>
+            {% endif %}
+          </td>
+          <td class="text-center">
+            <span class="badge text-bg-light border">{{ mcount }}</span>
+          </td>
+          <td>{{ party.note or '—' }}</td>
+          <td class="text-end text-nowrap">
+            <div class="d-inline-flex gap-1">
+              <button type="button"
+                      class="btn btn-sm btn-outline-warning"
+                      data-bs-toggle="modal"
+                      data-bs-target="#editLoanPartyModal"
+                      data-edit-url="{{ url_for('accounts.edit_loan_party', party_id=party.id) }}"
+                      data-id="{{ party.id }}"
+                      data-name="{{ party.name }}"
+                      data-opening="{{ '%.2f'|format(((party.opening_principal_minor|abs) / 100)|float) }}"
+                      data-opening-signed="{{ '%.2f'|format((party.opening_principal_minor / 100)|float) }}"
+                      data-opening-direction="{{ 'owes_us' if party.opening_principal_minor < 0 else 'we_owe' }}"
+                      data-opening-date="{{ party.opening_principal_date.strftime('%Y-%m-%d') if party.opening_principal_date else '' }}"
+                      data-note="{{ party.note or '' }}"
+                      data-active="{{ '1' if party.is_active else '0' }}"
+                      title="Edit loan party">
+                <i class="bi bi-pencil-square"></i>
+              </button>
+              <form method="post"
+                    action="{{ url_for('accounts.toggle_loan_party_route', party_id=party.id) }}"
+                    class="d-inline"
+                    onsubmit="return confirm('{% if party.is_active %}Deactivate{% else %}Activate{% endif %} loan party {{ party.name|e }}?');">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token or '' }}">
+                {% if selected_party_id %}<input type="hidden" name="filter_party_id" value="{{ selected_party_id }}">{% endif %}
+                <button type="submit"
+                        class="btn btn-sm {% if party.is_active %}btn-outline-secondary{% else %}btn-outline-success{% endif %}"
+                        title="{% if party.is_active %}Deactivate loan party{% else %}Activate loan party{% endif %}">
+                  <i class="bi {% if party.is_active %}bi-pause-circle{% else %}bi-play-circle{% endif %}"></i>
+                </button>
+              </form>
+              {% if mcount == 0 %}
+                <form method="post"
+                      action="{{ url_for('accounts.delete_loan_party_route', party_id=party.id) }}"
+                      class="d-inline"
+                      onsubmit="return confirm('Permanently delete loan party {{ party.name|e }}?');">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token or '' }}">
+                  {% if selected_party_id %}<input type="hidden" name="filter_party_id" value="{{ selected_party_id }}">{% endif %}
+                  <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete loan party">
+                    <i class="bi bi-trash"></i>
+                  </button>
+                </form>
+              {% else %}
+                <button type="button"
+                        class="btn btn-sm btn-outline-secondary"
+                        disabled
+                        title="Delete this party's movements first, or deactivate the loan party.">
+                  <i class="bi bi-trash"></i>
+                </button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+      {% else %}<tr><td colspan="6" class="text-muted text-center py-4">No loan parties yet.</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header fw-bold d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <span>{% if selected_party %}Party Ledger · {{ selected_party.name }}{% else %}Recent principal history{% endif %}</span>
+      <form method="get" action="{{ url_for('accounts.loan_register') }}" class="d-flex align-items-center gap-2">
+        <select class="form-select form-select-sm" name="party_id" onchange="this.form.submit()" aria-label="Filter movements by loan party">
+          <option value="">All loan parties</option>
+          {% for party in parties %}
+            <option value="{{ party.id }}" {% if selected_party_id == party.id %}selected{% endif %}>{{ party.name }}{% if not party.is_active %} (Inactive){% endif %}</option>
+          {% endfor %}
+        </select>
+        {% if selected_party_id %}
+          <a href="{{ url_for('accounts.loan_register') }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+        {% endif %}
+      </form>
+    </div>
+
+    {% if selected_party %}
+      {% set sel_open = selected_party.opening_principal_minor or 0 %}
+      {% set sel_in = received_totals.get(selected_party.id, 0) %}
+      {% set sel_out = repaid_totals.get(selected_party.id, 0) %}
+      {% set sel_bal = outstanding_minor.get(selected_party.id, 0) %}
+      <div class="card-body border-bottom py-2">
+        <div class="d-flex flex-wrap gap-4 small">
+          <div>
+            <span class="text-muted">Opening:</span>
+            <strong>{{ '+Rs. ' if sel_open > 0 else ('-Rs. ' if sel_open < 0 else 'Rs. ') }}{{ '{:,.2f}'.format(((sel_open|abs) / 100)|float) }}</strong>
+          </div>
+          <div>
+            <span class="text-muted">Money In (+):</span>
+            <strong class="text-success">+Rs. {{ '{:,.2f}'.format((sel_in / 100)|float) }}</strong>
+          </div>
+          <div>
+            <span class="text-muted">Money Out (-):</span>
+            <strong class="text-warning">-Rs. {{ '{:,.2f}'.format((sel_out / 100)|float) }}</strong>
+          </div>
+          <div>
+            <span class="text-muted">Closing Balance:</span>
+            {% if sel_bal > 0 %}
+              <strong class="text-danger">+Rs. {{ '{:,.2f}'.format((sel_bal / 100)|float) }} (We Owe)</strong>
+            {% elif sel_bal < 0 %}
+              <strong class="text-info">-Rs. {{ '{:,.2f}'.format(((-sel_bal) / 100)|float) }} (Owes Us)</strong>
+            {% else %}
+              <strong>Rs. 0.00 (Settled)</strong>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="table-responsive"><table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Loan Party</th>
+          <th>Movement</th>
+          <th>Account</th>
+          <th>Reference / note</th>
+          <th class="text-end">Amount</th>
+          <th class="text-end">Running Balance</th>
+          <th>Ledger</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for movement in movements %}
+        {% set meta = movement_meta.get(movement.id, {}) %}
+        {% set rbal = meta.get('running_balance_minor', 0) %}
+        {% set ctx_label = meta.get('context_label', 'Loan Received' if movement.movement_type == 'received' else 'Loan Repaid') %}
+        <tr>
+          <td>{{ movement.date_posted.strftime('%Y-%m-%d') if movement.date_posted else '—' }}</td>
+          <td>
+            <a href="{{ url_for('accounts.loan_register', party_id=movement.loan_party_id) }}" class="text-decoration-none">{{ movement.loan_party.name }}</a>
+            {% if not movement.loan_party.is_active %}<span class="badge text-bg-secondary ms-1">Inactive</span>{% endif %}
+          </td>
+          <td>
+            {% if movement.movement_type == 'received' %}
+              <span class="badge text-bg-success">Money In (+)</span>
+            {% else %}
+              <span class="badge text-bg-warning">Money Out (-)</span>
+            {% endif %}
+            <div class="small text-muted mt-1">{{ ctx_label }}</div>
+          </td>
+          <td>{{ movement.cash_account.name }}</td>
+          <td>{{ movement.reference or '' }}{% if movement.note %}<div class="small text-muted">{{ movement.note }}</div>{% endif %}</td>
+          <td class="text-end text-nowrap fw-semibold {% if movement.movement_type == 'received' %}text-success{% else %}text-warning{% endif %}">
+            {{ '+' if movement.movement_type == 'received' else '-' }}Rs. {{ '{:,.2f}'.format((movement.amount_minor / 100)|float) }}
+          </td>
+          <td class="text-end text-nowrap">
+            {% if rbal > 0 %}
+              <span class="fw-semibold text-danger">+Rs. {{ '{:,.2f}'.format((rbal / 100)|float) }}</span>
+              <div class="small text-muted">We Owe</div>
+            {% elif rbal < 0 %}
+              <span class="fw-semibold text-info">-Rs. {{ '{:,.2f}'.format(((-rbal) / 100)|float) }}</span>
+              <div class="small text-muted">Owes Us</div>
+            {% else %}
+              <span class="fw-semibold">Rs. 0.00</span>
+              <div class="small text-muted">Settled</div>
+            {% endif %}
+          </td>
+          <td>{% if movement.account_tx_id %}<span class="badge text-bg-light border">ATX-{{ movement.account_tx_id }}</span>{% endif %}</td>
+          <td class="text-end text-nowrap">
+            <div class="d-inline-flex gap-1">
+              <button type="button"
+                      class="btn btn-sm btn-outline-warning"
+                      data-bs-toggle="modal"
+                      data-bs-target="#editLoanMovementModal"
+                      data-edit-url="{{ url_for('accounts.edit_loan_movement', movement_id=movement.id) }}"
+                      data-id="{{ movement.id }}"
+                      data-party-id="{{ movement.loan_party_id }}"
+                      data-type="{{ movement.movement_type }}"
+                      data-amount="{{ '%.2f'|format((movement.amount_minor / 100)|float) }}"
+                      data-account-id="{{ movement.cash_account_id }}"
+                      data-date="{{ movement.date_posted.strftime('%Y-%m-%d') if movement.date_posted else '' }}"
+                      data-reference="{{ movement.reference or '' }}"
+                      data-note="{{ movement.note or '' }}"
+                      title="Edit movement">
+                <i class="bi bi-pencil-square"></i>
+              </button>
+              <form method="post"
+                    action="{{ url_for('accounts.delete_loan_movement', movement_id=movement.id) }}"
+                    class="d-inline"
+                    onsubmit="return confirm('Delete this loan principal movement? The linked cash/bank balance and party balance will be reversed.');">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token or '' }}">
+                {% if selected_party_id %}<input type="hidden" name="filter_party_id" value="{{ selected_party_id }}">{% endif %}
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete movement">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+      {% else %}<tr><td colspan="9" class="text-muted text-center py-4">No principal movements recorded.</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- Edit Loan Party Modal -->
+<div class="modal fade" id="editLoanPartyModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form method="post" id="editLoanPartyForm" class="modal-content">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token or '' }}">
+      <input type="hidden" name="is_active_submitted" value="1">
+      {% if selected_party_id %}<input type="hidden" name="filter_party_id" value="{{ selected_party_id }}">{% endif %}
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-pencil-square me-2 text-warning"></i>Edit Loan Party</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body vstack gap-3">
+        <div>
+          <label class="form-label fw-semibold" for="editPartyName">Loan party name <span class="text-danger">*</span></label>
+          <input class="form-control" id="editPartyName" name="name" maxlength="160" required>
+        </div>
+        <div class="row g-2">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" for="editPartyOpening">Opening balance (Rs.)</label>
+            <input class="form-control" id="editPartyOpening" name="opening_principal" type="number" step="0.01" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" for="editPartyDirection">Direction</label>
+            <select class="form-select" id="editPartyDirection" name="opening_direction">
+              <option value="we_owe">We Owe Party (+ Payable)</option>
+              <option value="owes_us">Party Owes Us (- Receivable)</option>
+            </select>
+          </div>
+        </div>
+        <div class="small" id="editOpeningPreview"></div>
+        <div>
+          <label class="form-label fw-semibold" for="editPartyOpeningDate">Opening balance as of</label>
+          <input class="form-control" id="editPartyOpeningDate" name="opening_date" type="date">
+        </div>
+        <div>
+          <label class="form-label fw-semibold" for="editPartyNote">Note (optional)</label>
+          <textarea class="form-control" id="editPartyNote" name="note" maxlength="500" rows="2"></textarea>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="editPartyActive" name="is_active" value="1">
+          <label class="form-check-label" for="editPartyActive">Active (available for new movements)</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-warning text-dark fw-semibold"><i class="bi bi-check-lg me-1"></i>Save Changes</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit Principal Movement Modal -->
+<div class="modal fade" id="editLoanMovementModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <form method="post" id="editLoanMovementForm" class="modal-content">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token or '' }}">
+      {% if selected_party_id %}<input type="hidden" name="filter_party_id" value="{{ selected_party_id }}">{% endif %}
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-pencil-square me-2 text-warning"></i>Edit Loan Principal Movement</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" for="editMovementPartyId">Loan party <span class="text-danger">*</span></label>
+            <select class="form-select" id="editMovementPartyId" name="loan_party_id" required>
+              {% for party in parties %}
+                <option value="{{ party.id }}" data-active="{{ '1' if party.is_active else '0' }}">{{ party.name }}{% if not party.is_active %} (Inactive){% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-semibold" for="editMovementType">Movement <span class="text-danger">*</span></label>
+            <select class="form-select" id="editMovementType" name="movement_type" required>
+              <option value="received">Money In — Loan Received / Recovery (+)</option>
+              <option value="repaid">Money Out — Loan Given / Repaid (-)</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold" for="editMovementAmount">Amount (Rs.) <span class="text-danger">*</span></label>
+            <input class="form-control" id="editMovementAmount" name="amount" type="number" min="0.01" step="0.01" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold" for="editMovementAccountId">Cash / bank account <span class="text-danger">*</span></label>
+            <select class="form-select" id="editMovementAccountId" name="cash_account_id" required>
+              {% for account in edit_cash_accounts %}
+                <option value="{{ account.id }}" data-active="{{ '1' if account.is_active else '0' }}">{{ account.name }} · {{ account.category|upper }}{% if not account.is_active %} (Inactive){% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold" for="editMovementDate">Date <span class="text-danger">*</span></label>
+            <input class="form-control" id="editMovementDate" type="date" name="date_posted" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold" for="editMovementReference">Reference (optional)</label>
+            <input class="form-control" id="editMovementReference" name="reference" maxlength="100">
+          </div>
+          <div class="col-md-8">
+            <label class="form-label fw-semibold" for="editMovementNote">Note (optional)</label>
+            <input class="form-control" id="editMovementNote" name="note" maxlength="500">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-warning text-dark fw-semibold"><i class="bi bi-check-lg me-1"></i>Save Movement</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  function fmtRs(minor) {
+    var absVal = (Math.abs(minor) / 100).toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+    if (minor > 0) return '+Rs. ' + absVal;
+    if (minor < 0) return '-Rs. ' + absVal;
+    return 'Rs. 0.00';
+  }
+
+  function wireOpeningControls(amountInputId, dirSelectId, previewId) {
+    var amtEl = document.getElementById(amountInputId);
+    var dirEl = document.getElementById(dirSelectId);
+    var prevEl = document.getElementById(previewId);
+    if (!amtEl || !dirEl || !prevEl) return function () {};
+
+    function updatePreview() {
+      var rawStr = (amtEl.value || '').trim();
+      var num = parseFloat(rawStr);
+      if (!rawStr || isNaN(num) || num === 0) {
+        prevEl.innerHTML = '<span class="text-muted">Opening: <strong>Rs. 0.00</strong> (Settled)</span>';
+        return;
+      }
+      var absMinor = Math.round(Math.abs(num) * 100);
+      var signedMinor = (num < 0 || dirEl.value === 'owes_us') ? -absMinor : absMinor;
+      if (signedMinor > 0) {
+        prevEl.innerHTML = '<span class="text-danger">Opening: <strong>' + fmtRs(signedMinor) + '</strong> (We Owe Party)</span>';
+      } else {
+        prevEl.innerHTML = '<span class="text-info">Opening: <strong>' + fmtRs(signedMinor) + '</strong> (Party Owes Us)</span>';
+      }
+    }
+
+    amtEl.addEventListener('input', function () {
+      var num = parseFloat(amtEl.value);
+      if (!isNaN(num) && num < 0) {
+        dirEl.value = 'owes_us';
+      }
+      updatePreview();
+    });
+
+    dirEl.addEventListener('change', function () {
+      var num = parseFloat(amtEl.value);
+      if (dirEl.value === 'we_owe' && !isNaN(num) && num < 0) {
+        amtEl.value = Math.abs(num).toFixed(2);
+      }
+      updatePreview();
+    });
+
+    updatePreview();
+    return updatePreview;
+  }
+
+  wireOpeningControls('openingPrincipal', 'openingDirection', 'addOpeningPreview');
+  var refreshEditOpeningPreview = wireOpeningControls('editPartyOpening', 'editPartyDirection', 'editOpeningPreview');
+
+  var mPartyEl = document.getElementById('movementPartySelect');
+  var mTypeEl = document.getElementById('movementTypeSelect');
+  var mAmtEl = document.getElementById('movementAmountInput');
+  var mPrevEl = document.getElementById('movementBalancePreview');
+
+  function updateMovementPreview() {
+    if (!mPartyEl || !mTypeEl || !mAmtEl || !mPrevEl) return;
+    var opt = mPartyEl.options[mPartyEl.selectedIndex];
+    if (!opt || !opt.value) {
+      mPrevEl.textContent = '';
+      return;
+    }
+    var curMinor = parseInt(opt.getAttribute('data-balance-minor') || '0', 10) || 0;
+    var amt = parseFloat(mAmtEl.value);
+    var deltaMinor = (!isNaN(amt) && amt > 0) ? Math.round(amt * 100) : 0;
+    var signedDelta = mTypeEl.value === 'received' ? deltaMinor : -deltaMinor;
+    var nextMinor = curMinor + signedDelta;
+    var statusTag = nextMinor > 0 ? 'We Owe' : (nextMinor < 0 ? 'Owes Us' : 'Settled');
+    if (deltaMinor > 0) {
+      mPrevEl.innerHTML = 'Current: <strong>' + fmtRs(curMinor) + '</strong> &rarr; After movement: <strong>' + fmtRs(nextMinor) + '</strong> (' + statusTag + ')';
+    } else {
+      mPrevEl.innerHTML = 'Current balance: <strong>' + fmtRs(curMinor) + '</strong> (' + (curMinor > 0 ? 'We Owe' : (curMinor < 0 ? 'Owes Us' : 'Settled')) + ')';
+    }
+  }
+
+  if (mPartyEl && mTypeEl && mAmtEl) {
+    mPartyEl.addEventListener('change', updateMovementPreview);
+    mTypeEl.addEventListener('change', updateMovementPreview);
+    mAmtEl.addEventListener('input', updateMovementPreview);
+  }
+
+  var partyModal = document.getElementById('editLoanPartyModal');
+  if (partyModal) {
+    partyModal.addEventListener('show.bs.modal', function (event) {
+      var btn = event.relatedTarget;
+      if (!btn) return;
+      document.getElementById('editLoanPartyForm').action = btn.getAttribute('data-edit-url');
+      document.getElementById('editPartyName').value = btn.getAttribute('data-name') || '';
+      document.getElementById('editPartyOpening').value = btn.getAttribute('data-opening') || '0.00';
+      document.getElementById('editPartyDirection').value = btn.getAttribute('data-opening-direction') || 'we_owe';
+      document.getElementById('editPartyOpeningDate').value = btn.getAttribute('data-opening-date') || '';
+      document.getElementById('editPartyNote').value = btn.getAttribute('data-note') || '';
+      document.getElementById('editPartyActive').checked = btn.getAttribute('data-active') === '1';
+      refreshEditOpeningPreview();
+    });
+  }
+
+  var movementModal = document.getElementById('editLoanMovementModal');
+  if (movementModal) {
+    movementModal.addEventListener('show.bs.modal', function (event) {
+      var btn = event.relatedTarget;
+      if (!btn) return;
+      document.getElementById('editLoanMovementForm').action = btn.getAttribute('data-edit-url');
+
+      var partySelect = document.getElementById('editMovementPartyId');
+      var currentPartyId = btn.getAttribute('data-party-id') || '';
+      Array.prototype.forEach.call(partySelect.options, function (opt) {
+        opt.disabled = (opt.getAttribute('data-active') !== '1') && (opt.value !== currentPartyId);
+      });
+      partySelect.value = currentPartyId;
+
+      var accSelect = document.getElementById('editMovementAccountId');
+      var currentAccountId = btn.getAttribute('data-account-id') || '';
+      Array.prototype.forEach.call(accSelect.options, function (opt) {
+        opt.disabled = (opt.getAttribute('data-active') !== '1') && (opt.value !== currentAccountId);
+      });
+      accSelect.value = currentAccountId;
+
+      document.getElementById('editMovementType').value = btn.getAttribute('data-type') || 'received';
+      document.getElementById('editMovementAmount').value = btn.getAttribute('data-amount') || '';
+      document.getElementById('editMovementDate').value = btn.getAttribute('data-date') || '';
+      document.getElementById('editMovementReference').value = btn.getAttribute('data-reference') || '';
+      document.getElementById('editMovementNote').value = btn.getAttribute('data-note') || '';
+    });
+  }
+});
+</script>
+{% endblock %}

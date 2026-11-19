@@ -1,0 +1,81 @@
+AMS v5.2 — FIX PASS + RE-TEST · 2026-11-18
+================================================================================
+
+WHAT WAS ASKED: fix everything the audit found, then test again.
+
+RESULT: 12 findings fixed · 1 fixed with documented policy · 2 RETRACTED as
+false positives from my own audit harness · 20/20 re-tests PASS on a fresh
+database through the real forms · 12/12 financial reconciliations tie to the cent
+· 12/12 integrity invariants clean.
+
+WHERE: the fixed build is /home/user/AMSV5-2_FIXED/ (audit baseline AMSV5-2/
+untouched, 314/314 source hashes identical). Apply with FIXES_2026-11-18.patch
+(20 files) or copy the folder. No production database was touched.
+
+--------------------------------------------------------------------------------
+THE TWO RETRACTIONS (my errors, not the app's)
+  F-06 "no CSRF"      WITHDRAWN. app/hooks.py::_protect_against_csrf has always
+                      enforced a session token on every mutating route. My
+                      harness ran with TESTING=True, which the hook honours.
+                      Gate forced on: no token -> HTTP 400, 0 rows; token -> saved.
+  F-09 "no charges"   WITHDRAWN. That sentence is the hidden empty-state of the
+                      GRN Expenses tab, not a flash. The 5,000 charge was saved
+                      and capitalised at 122.50/unit all along.
+  Findings: 15 -> 13, HIGH 7 -> 6. Security on the tested surface: PASS/PASS.
+
+--------------------------------------------------------------------------------
+THE FIXES
+  F-01  A return now settles the bill it came from (form field "Against Sale
+        Bill"; otherwise newest matching sale by material). Stored on
+        material_return.source_sale_id and honoured by the rebuild replay.
+        Was: 1,600 credit for bill B landed on unrelated bill A.
+        Now: B 1,600 -> 0, A untouched.
+  F-02  Dashboard "Daily Due" withholds only each booking's OWN undelivered
+        value. Was 16,000 short; now the delivered booking counts (31,100).
+  F-03  "Undelivered Bookings" = the client's value once. Was 90,000 for
+        three bookings; now 30,000, matching the client ledger.
+  F-04  Current Payables / Total Outstanding exclude undelivered bookings and
+        disclose them separately. Was 48,222 vs 18,222 vs 15,322 on three
+        screens; now one number everywhere.
+  F-05  Daily Breakdown money tile = cash receipts only, credit notes disclosed
+        separately. Was 23,878 including 13,100 of return credits.
+  F-07  Void means void: document kept (is_void), effects reversed, reason
+        required and audited; permanent delete needs the word DELETE typed;
+        UI buttons updated. Found and fixed a real gap on the way: voiding a
+        receipt now reopens the invoice it had paid.
+  F-08  Walk-in returns work: name the bill, the customer gets a real account.
+  F-10  Integrity Audit stops flagging its own booking deliveries and now
+        reconciles payables vs client ledgers and each cash account vs its
+        ledger: 0 issues, 0 mismatches.
+  F-11  Booked dispatches freeze their cost basis on the delivery line (100.00
+        instead of NULL); zero sale value stays by design.
+  F-12  Every stock movement names its document: 0 unlinked entries (was 4).
+  F-13  No pending bill for a fully paid counter sale: 0 zero-amount live bills.
+  F-14  Tile renamed "Cash on Today's Trading" with an explicit caption.
+  F-15  Retired GRN cost fields are posted as real charge rows (5,000 ->
+        landed 122.50/unit) instead of being silently ignored.
+
+--------------------------------------------------------------------------------
+RE-TEST DAY (fresh DB, real forms): gross 77,150 · discounts 483.33 · net
+revenue 76,666.67 · COGS 49,700 · net profit 26,966.67 · cash 99,506 (= account
+balance) · stock 1,015 / 490 (ledger = master) · receivable 12,644 · undelivered
+commitments 46,000. Every figure matched an independent recomputation exactly.
+
+INTEGRITY: integrity_check ok · 0 FK violations · 0 orphans · 0 unlinked
+movements · 0 negative stock · 0 zero-amount live bills · 0 duplicate keys ·
+0 pending bills for voided sales · 0 returns without a source bill.
+
+--------------------------------------------------------------------------------
+STILL OPEN / NOT CLAIMED
+  - Client receipts still allocate oldest-bill-first unless a bill is named
+    (a payment is not modelled against an invoice; a return now is).
+  - Booking dispatches still record zero sale value (fulfilment semantics).
+  - Not re-tested: loans, delivery rents, import/export, backups, non-admin
+    roles, concurrency. This pass fixed findings; it did not widen coverage.
+  - Nothing was applied to your live app or database.
+
+Deliverables: FIXES_2026-11-18.md · FIXES_2026-11-18.patch ·
+BUG_REGISTER_2026-11-18_UPDATED.csv · RETEST_RESULTS_2026-11-18.csv (20/20) ·
+retest/FINANCIAL_RECONCILIATION_RETEST_2026-11-18.csv (12/12) ·
+AUDIT_AMENDMENTS_2026-11-18.md · retest/retest.db · tools/retest_all.py
+================================================================================

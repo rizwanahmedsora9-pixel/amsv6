@@ -1,0 +1,328 @@
+/* =========================================================================
+   AMS — Logs section (redesign)
+   Loaded only by templates/logs/*.html. Built on the ui.css tokens so dark and
+   light themes both work without duplicating colours.
+   ========================================================================= */
+
+/* ---- Tab bar ------------------------------------------------------------ */
+.logs-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px;
+    margin-bottom: 18px;
+    background: var(--ui-surface);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-lg);
+    box-shadow: var(--ui-shadow-1);
+}
+.logs-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 14px;
+    border-radius: var(--ui-radius);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--ui-text-muted);
+    font-weight: 600;
+    font-size: 0.88rem;
+    text-decoration: none;
+    line-height: 1.1;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    white-space: nowrap;
+}
+.logs-tab i { font-size: 1.05em; }
+.logs-tab:hover {
+    background: var(--ui-surface-2);
+    color: var(--ui-text);
+    text-decoration: none;
+}
+.logs-tab .logs-tab-count {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: var(--ui-radius-pill);
+    background: var(--ui-surface-3);
+    color: var(--ui-text-muted);
+    font-variant-numeric: tabular-nums;
+}
+.logs-tab.is-active {
+    background: color-mix(in srgb, var(--ui-accent) 16%, transparent);
+    border-color: color-mix(in srgb, var(--ui-accent) 55%, transparent);
+    color: var(--ui-text);
+}
+.logs-tab.is-active i { color: var(--ui-accent); }
+.logs-tab.is-active .logs-tab-count {
+    background: var(--ui-accent);
+    color: #14110a;
+}
+.logs-tab.is-warn .logs-tab-count { background: color-mix(in srgb, var(--ui-danger) 22%, transparent); color: var(--ui-danger); }
+.logs-tab-sep { width: 1px; align-self: stretch; background: var(--ui-border); margin: 2px 4px; }
+
+/* ---- Honesty banner ---------------------------------------------------- */
+.logs-coverage {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 12px 16px;
+    margin-bottom: 14px;
+    border-radius: var(--ui-radius);
+    border: 1px solid color-mix(in srgb, var(--ui-info) 35%, var(--ui-border));
+    background: color-mix(in srgb, var(--ui-info) 8%, var(--ui-surface));
+    color: var(--ui-text-soft);
+    font-size: 0.84rem;
+    line-height: 1.45;
+}
+.logs-coverage i { color: var(--ui-info); font-size: 1.1rem; margin-top: 1px; }
+.logs-coverage strong { color: var(--ui-text); }
+.logs-coverage code {
+    background: var(--ui-surface-2);
+    color: var(--ui-text);
+    padding: 1px 5px;
+    border-radius: 5px;
+    font-size: 0.82em;
+}
+
+/* ---- Status pills ------------------------------------------------------ */
+.logs-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 9px;
+    border-radius: var(--ui-radius-pill);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+.logs-pill::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.logs-pill.working { color: #0b3d2c; background: #34d399; border-color: #10b981; }
+.logs-pill.idle    { color: #3f2d05; background: #fbbf24; border-color: #f59e0b; }
+.logs-pill.away    { color: #082f49; background: #7dd3fc; border-color: #38bdf8; }
+.logs-pill.offline { color: var(--ui-text-muted); background: var(--ui-surface-3); border-color: var(--ui-border); }
+.logs-pill.expired { color: #4c0519; background: #fda4af; border-color: #fb7185; }
+
+.logs-pill.create  { color: #052e1b; background: #6ee7b7; border-color: #10b981; }
+.logs-pill.update  { color: #3b2503; background: #fcd34d; border-color: #f59e0b; }
+.logs-pill.delete  { color: #4c0519; background: #fda4af; border-color: #fb7185; }
+.logs-pill.view    { color: #0c2340; background: #bae6fd; border-color: #38bdf8; }
+.logs-pill.success { color: #052e1b; background: #6ee7b7; border-color: #10b981; }
+.logs-pill.failed  { color: #4c0519; background: #fda4af; border-color: #fb7185; }
+.logs-pill.blocked { color: #3b2503; background: #fcd34d; border-color: #f59e0b; }
+.logs-pill.logout  { color: var(--ui-text-muted); background: var(--ui-surface-3); border-color: var(--ui-border); }
+.logs-pill.error   { color: #4c0519; background: #fda4af; border-color: #fb7185; }
+.logs-pill.transient { color: #3b2503; background: #fcd34d; border-color: #f59e0b; }
+.logs-pill.soft    { color: #431407; background: #fdba74; border-color: #fb923c; }
+.logs-pill.void    { color: #4c0519; background: #fda4af; border-color: #fb7185; }
+.logs-pill.restore { color: #052e1b; background: #6ee7b7; border-color: #10b981; }
+
+.logs-chip {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 6px;
+    background: var(--ui-surface-2);
+    border: 1px solid var(--ui-border);
+    color: var(--ui-text-soft);
+    font-size: 0.76rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* ---- Summary line in a row -------------------------------------------- */
+.logs-summary { color: var(--ui-text); font-weight: 600; font-size: 0.9rem; }
+.logs-sub { color: var(--ui-text-muted); font-size: 0.78rem; margin-top: 2px; }
+.logs-when { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 0.82rem; }
+.logs-when .logs-age { display: block; color: var(--ui-text-muted); font-size: 0.74rem; }
+.logs-money { font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+
+/* ---- Diff table (edited entries) -------------------------------------- */
+.logs-diff { margin: 0; font-size: 0.82rem; }
+.logs-diff td, .logs-diff th { padding: 4px 8px; border-bottom: 1px dashed var(--ui-border); }
+.logs-diff th { color: var(--ui-text-muted); font-weight: 600; text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.05em; }
+.logs-diff .old { color: #fb7185; text-decoration: line-through; text-decoration-thickness: 1px; }
+.logs-diff .new { color: #34d399; font-weight: 600; }
+.logs-diff .field { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ui-text-soft); }
+
+details.logs-expand > summary {
+    cursor: pointer;
+    color: var(--ui-accent);
+    font-size: 0.78rem;
+    font-weight: 600;
+    list-style: none;
+}
+details.logs-expand > summary::-webkit-details-marker { display: none; }
+details.logs-expand > summary::before { content: '▸ '; }
+details.logs-expand[open] > summary::before { content: '▾ '; }
+
+/* ---- JSON viewer ------------------------------------------------------- */
+.logs-json {
+    background: var(--ui-surface-2);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius);
+    padding: 10px 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.76rem;
+    color: var(--ui-text-soft);
+    max-height: 260px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 6px 0 0;
+}
+
+/* ---- Raw log viewer --------------------------------------------------- */
+.logs-viewer {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    background: var(--ui-surface-2);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius);
+    padding: 10px 12px;
+    max-height: 620px;
+    overflow: auto;
+    color: var(--ui-text-soft);
+}
+.logs-line { display: flex; gap: 10px; padding: 1px 0; border-bottom: 1px solid color-mix(in srgb, var(--ui-border) 45%, transparent); }
+.logs-line:hover { background: color-mix(in srgb, var(--ui-accent) 6%, transparent); }
+.logs-line .ts { color: var(--ui-text-muted); white-space: nowrap; flex: 0 0 auto; }
+.logs-line .lv { font-weight: 700; flex: 0 0 68px; }
+.logs-line .lv.INFO { color: var(--ui-info); }
+.logs-line .lv.WARNING { color: var(--ui-warn); }
+.logs-line .lv.ERROR, .logs-line .lv.CRITICAL { color: var(--ui-danger); }
+.logs-line .lv.DEBUG { color: var(--ui-text-muted); }
+.logs-line .lg { color: var(--ui-violet); flex: 0 0 130px; overflow: hidden; text-overflow: ellipsis; }
+.logs-line .msg { flex: 1 1 auto; word-break: break-word; }
+
+/* ---- Presence cards --------------------------------------------------- */
+.logs-user-card {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 14px 16px;
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius);
+    background: var(--ui-surface);
+    height: 100%;
+}
+.logs-user-card.is-working { border-color: color-mix(in srgb, #10b981 55%, var(--ui-border)); }
+.logs-user-card.is-idle { border-color: color-mix(in srgb, #f59e0b 55%, var(--ui-border)); }
+.logs-user-avatar {
+    width: 42px; height: 42px;
+    flex: 0 0 42px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-weight: 800;
+    font-size: 1rem;
+    background: color-mix(in srgb, var(--ui-accent) 20%, var(--ui-surface-2));
+    color: var(--ui-accent);
+    border: 1px solid var(--ui-border);
+}
+.logs-user-name { font-weight: 700; color: var(--ui-text); font-size: 0.95rem; }
+.logs-user-meta { color: var(--ui-text-muted); font-size: 0.8rem; margin-top: 2px; }
+.logs-user-page { color: var(--ui-text-soft); font-size: 0.8rem; margin-top: 6px; word-break: break-word; }
+
+.logs-stat {
+    display: flex;
+    flex-direction: column;
+    padding: 12px 14px;
+    border-radius: var(--ui-radius);
+    background: var(--ui-surface-2);
+    border: 1px solid var(--ui-border);
+}
+.logs-stat .k { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ui-text-muted); font-weight: 700; }
+.logs-stat .v { font-size: 1.5rem; font-weight: 800; color: var(--ui-text); line-height: 1.2; }
+.logs-stat.working .v { color: #34d399; }
+.logs-stat.idle .v { color: #fbbf24; }
+.logs-stat.offline .v { color: var(--ui-text-muted); }
+
+/* ---- Bars (per-day chart without a JS library) ------------------------ */
+.logs-bars { display: flex; flex-direction: column; gap: 5px; }
+.logs-bar-row { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; }
+.logs-bar-row .day { flex: 0 0 84px; color: var(--ui-text-muted); font-variant-numeric: tabular-nums; }
+.logs-bar-row .track { flex: 1 1 auto; height: 9px; background: var(--ui-surface-3); border-radius: 5px; overflow: hidden; }
+.logs-bar-row .fill { height: 100%; background: linear-gradient(90deg, var(--ui-accent), var(--ui-violet)); }
+.logs-bar-row .n { flex: 0 0 46px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ui-text-soft); }
+
+/* ---- Empty state ------------------------------------------------------ */
+.logs-empty { text-align: center; padding: 42px 18px; color: var(--ui-text-muted); }
+.logs-empty i { font-size: 2rem; display: block; margin-bottom: 10px; opacity: 0.7; }
+.logs-empty .t { color: var(--ui-text); font-weight: 700; font-size: 1rem; margin-bottom: 6px; }
+.logs-empty .h { font-size: 0.86rem; max-width: 560px; margin: 0 auto; }
+
+/* ---- Pager ------------------------------------------------------------ */
+.logs-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--ui-border); }
+.logs-pager .pages { display: flex; gap: 4px; flex-wrap: wrap; }
+.logs-pager .pg {
+    min-width: 34px; text-align: center;
+    padding: 5px 9px;
+    border-radius: 8px;
+    border: 1px solid var(--ui-border);
+    background: var(--ui-surface-2);
+    color: var(--ui-text-soft);
+    font-size: 0.82rem;
+    text-decoration: none;
+    font-weight: 600;
+}
+.logs-pager .pg:hover { border-color: var(--ui-accent); color: var(--ui-text); }
+.logs-pager .pg.is-active { background: var(--ui-accent); border-color: var(--ui-accent); color: #14110a; }
+.logs-pager .pg.is-disabled { opacity: 0.4; pointer-events: none; }
+.logs-count { color: var(--ui-text-muted); font-size: 0.82rem; }
+
+/* ---- Filters ---------------------------------------------------------
+   The shared filter-bar macro renders `.ui-form > .ui-card-body > .ui-row`,
+   and ui.css defines `.ui-form .ui-row` as a 12-column grid.  The logs bar has
+   eleven fields and no `ui-col-*` spans, so without the override below every
+   field was squeezed into 1/12 of the card (labels clipped, inputs unusable —
+   the "filters have no CSS" report).  `extra_class='logs-filter-grid'` on the
+   macro call turns the row into a responsive auto-fit grid instead, and the
+   selector is specific enough to beat `.ui-form .ui-row`. */
+.ui-form .ui-row.logs-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+    gap: 10px 12px;
+    align-items: end;
+}
+
+.logs-filter-grid .ui-field { min-width: 0; }
+
+/* The free-text search box earns two tracks (its own hint is a full sentence). */
+.ui-form .ui-row.logs-filter-grid > .ui-field-wide { grid-column: span 2; }
+
+/* Apply / Clear / CSV: one row of their own, right aligned. */
+.ui-form .ui-row.logs-filter-grid > .ui-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    padding-top: 2px;
+}
+
+/* A date input renders narrower than a select on some browsers; keep the row
+   visually even. */
+.logs-filter-grid .form-control,
+.logs-filter-grid .form-select { width: 100%; }
+
+@media (max-width: 900px) {
+    .ui-form .ui-row.logs-filter-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+    .ui-form .ui-row.logs-filter-grid > .ui-field-wide { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) {
+    .ui-form .ui-row.logs-filter-grid { grid-template-columns: 1fr; }
+    .ui-form .ui-row.logs-filter-grid > .ui-actions { justify-content: stretch; }
+    .ui-form .ui-row.logs-filter-grid > .ui-actions .btn { flex: 1 1 auto; }
+}
+
+@media (max-width: 768px) {
+    .logs-line .lg { display: none; }
+    .logs-tab { padding: 8px 10px; font-size: 0.8rem; }
+}

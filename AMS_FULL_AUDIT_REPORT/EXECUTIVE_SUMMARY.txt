@@ -1,0 +1,5 @@
+AMS FULL AUDIT - EXECUTIVE SUMMARY
+
+The isolated test copy passed 86 scenario tests. No new bugs were confirmed. A 325-route GET sweep found no route errors. The test database passed integrity and foreign-key checks.
+
+The application is not fully proven for real business use until browser, concurrent-user, and real-data testing are completed. Back up the real database before deployment and retain the supplier payment, return reversal, cash flow, ledger, and B-01 through B-09 regression tests.

@@ -1,0 +1,166 @@
+{# Users tab — every registered account plus live presence.
+   States are computed from the 60 s heartbeat (app/services/presence.py):
+     ONLINE WORKING  beat < 90 s, real input < 3 min
+     ONLINE IDLE     beat < 90 s, no input for 3 min+
+     AWAY            tab hidden but still beating
+     OFFLINE         no beat for 90 s, signed out, or never signed in       #}
+
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3"><div class="logs-stat working"><span class="k">Online — working</span><span class="v" data-presence="working">{{ presence_counts.get('working', 0) }}</span></div></div>
+  <div class="col-6 col-lg-3"><div class="logs-stat idle"><span class="k">Online — idle</span><span class="v" data-presence="idle">{{ presence_counts.get('idle', 0) }}</span></div></div>
+  <div class="col-6 col-lg-3"><div class="logs-stat"><span class="k">Away (tab hidden)</span><span class="v" data-presence="away">{{ presence_counts.get('away', 0) }}</span></div></div>
+  <div class="col-6 col-lg-3"><div class="logs-stat offline"><span class="k">Offline / expired</span><span class="v" data-presence="offline">{{ presence_counts.get('offline', 0) + presence_counts.get('expired', 0) }}</span></div></div>
+</div>
+
+<div class="ui-card mb-3">
+  <div class="ui-card-header">
+    <h5><i class="bi bi-people"></i> Registered users ({{ user_rows|length }})</h5>
+    <div class="ui-toolbar d-flex gap-2 align-items-center">
+      <span class="logs-count" id="presenceStamp">auto-refresh every 20 s · <span id="presenceClock">just now</span></span>
+      <button type="button" class="btn btn-outline-warning btn-sm btn-pill fw-bold" onclick="location.reload()">
+        <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+      </button>
+    </div>
+  </div>
+
+  <div class="row g-3 p-3">
+    {% for u in user_rows %}
+    <div class="col-md-6 col-xl-4">
+      <div class="logs-user-card {% if u.state == 'working' %}is-working{% elif u.state == 'idle' %}is-idle{% endif %}">
+        <div class="logs-user-avatar">{{ (u.username or '?')[:2]|upper }}</div>
+        <div class="flex-grow-1 min-w-0">
+          <div class="d-flex align-items-center justify-content-between gap-2">
+            <div class="logs-user-name text-truncate">{{ u.username }}</div>
+            <span class="logs-pill {{ u.state }}" data-user-state="{{ u.username }}">
+              {{ 'working' if u.state == 'working' else ('idle' if u.state == 'idle' else ('away' if u.state == 'away' else ('expired' if u.state == 'expired' else 'offline'))) }}
+            </span>
+          </div>
+          <div class="logs-user-meta">
+            {{ u.role or 'no role' }} ·
+            {% if u.account_status|lower == 'active' %}active{% else %}<span class="text-danger">{{ u.account_status }}</span>{% endif %}
+            {% if u.access_mode == 'read_only' %} · <span class="text-warning">read-only</span>{% endif %}
+          </div>
+          {% if u.state in ('working', 'idle', 'away') %}
+            <div class="logs-user-page">
+              <i class="bi bi-window"></i>
+              {{ u.current_page or 'unknown page' }}
+            </div>
+            <div class="logs-user-meta">
+              {{ u.ip or '—' }}
+              {% if u.last_beat %} · beat {{ u.last_beat | age }}{% endif %}
+              {% if u.last_input_age is not none %} · last input {{ u.last_input_age }} s ago{% endif %}
+            </div>
+            {% if u.session_count > 1 %}
+              <div class="logs-user-meta text-warning">{{ u.session_count }} open sessions (different PCs / tabs)</div>
+            {% endif %}
+          {% else %}
+            <div class="logs-user-meta">
+              {% if u.never_seen %}
+                Never signed in{% if u.created_at %} · account created {{ u.created_at.strftime('%Y-%m-%d') }}{% endif %}
+              {% elif u.last_beat %}
+                Last seen {{ u.last_beat.strftime('%Y-%m-%d %H:%M:%S') }} ({{ u.last_beat | age }})
+              {% else %}
+                No recorded session
+              {% endif %}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div class="col-12"><div class="logs-empty"><i class="bi bi-person-x"></i>
+      <div class="t">No user accounts exist</div>
+      <div class="h">Create one in Settings → Users.</div>
+    </div></div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="ui-card">
+  <div class="ui-card-header">
+    <h5><i class="bi bi-broadcast"></i> Open sessions in detail</h5>
+    <span class="logs-count">{{ live|length }} session{{ '' if live|length == 1 else 's' }} open now</span>
+  </div>
+  <div class="ui-table-wrap">
+    <table class="ui-table">
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>User</th>
+          <th>On screen</th>
+          <th>IP</th>
+          <th>Signed in</th>
+          <th>Last beat</th>
+          <th>Last input</th>
+          <th class="num">Beats</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in live %}
+        <tr>
+          <td><span class="logs-pill {{ s.state }}">{{ s.state }}</span></td>
+          <td>
+            <div class="fw-bold">{{ s.username }}</div>
+            <div class="logs-sub">{{ s.role or '—' }}</div>
+          </td>
+          <td>
+            <div class="logs-summary">{{ s.label or '—' }}</div>
+            <div class="logs-sub"><code class="logs-chip">{{ s.path or '—' }}</code></div>
+          </td>
+          <td>{{ s.ip or '—' }}</td>
+          <td class="logs-when">{{ s.since.strftime('%Y-%m-%d %H:%M') if s.since else '—' }}</td>
+          <td class="logs-when">
+            {% if s.beat_age is not none %}{{ s.beat_age }} s ago{% else %}—{% endif %}
+          </td>
+          <td class="logs-when">
+            {% if s.input_age is not none %}{{ s.input_age }} s ago{% else %}—{% endif %}
+          </td>
+          <td class="num">{{ s.row.beat_count or 0 }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8">
+          <div class="logs-empty"><i class="bi bi-broadcast-pin"></i>
+            <div class="t">No open sessions</div>
+            <div class="h">A session appears here the moment someone signs in (or the moment your own tab sends its first beat — about 3 seconds).</div>
+          </div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+/* Live presence without a page reload: asks /api/activity/state every 20 s and
+   updates the pills + counters. If the request fails the page simply keeps the
+   server-rendered values (no invented numbers). */
+(function () {
+  var STAMP = document.getElementById('presenceClock');
+  function paint(data) {
+    if (!data || !data.counts) return;
+    document.querySelectorAll('[data-presence]').forEach(function (el) {
+      var key = el.dataset.presence;
+      var val = data.counts[key];
+      if (key === 'offline') val = (data.counts.offline || 0) + (data.counts.expired || 0);
+      if (typeof val === 'number') el.textContent = val;
+    });
+    (data.users || []).forEach(function (u) {
+      document.querySelectorAll('[data-user-state]').forEach(function (el) {
+        if (el.dataset.userState === u.username) {
+          el.className = 'logs-pill ' + u.state;
+          el.textContent = u.state;
+        }
+      });
+    });
+    if (STAMP) STAMP.textContent = 'updated ' + (data.generated_at || '');
+  }
+  function tick() {
+    fetch('/api/activity/state', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(paint)
+      .catch(function () {});
+  }
+  tick();
+  setInterval(tick, 20000);
+})();
+</script>

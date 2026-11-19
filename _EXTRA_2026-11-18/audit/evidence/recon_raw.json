@@ -1,0 +1,110 @@
+{
+  "observed": {
+    "gross_sales": 79000.0,
+    "discounts": 500.0,
+    "net_revenue": 78500.0,
+    "cogs": 55600.0,
+    "net_profit": 22900.0,
+    "money_received": 60278.0,
+    "dash_daily_cash": 49500.0,
+    "dash_daily_due": 15322.0,
+    "dash_undelivered": 90000.0,
+    "dash_outstanding": 48222.0,
+    "cashflow_opening": null,
+    "cashflow_in": null,
+    "cashflow_out": null,
+    "cashflow_closing": null,
+    "payables_total": 48222.0,
+    "stock_in": 1990.0,
+    "stock_out": 620.0,
+    "stock_net": 1370.0,
+    "client_net_balance": 18222.0,
+    "client_undelivered": 30000.0,
+    "supplier_closing": 149000.0,
+    "supplier_credit": 209000.0,
+    "supplier_debit": 60000.0
+  },
+  "independent": {
+    "gross_sales": 76100.0,
+    "discounts": 500.0,
+    "net_revenue": 62500.0,
+    "cash_account_balance": 50278.0,
+    "stock_12mm": 1000.0,
+    "stock_20mm": 370.0,
+    "receipts_total": 10778.0,
+    "returns_total": 13100.0,
+    "sales_rows": 5
+  },
+  "recon": [
+    [
+      "Gross sales",
+      "Profit Reports",
+      "sum(direct_sale.amount) + booking delivered value",
+      76100.0,
+      79000.0
+    ],
+    [
+      "Discounts",
+      "Profit Reports",
+      "sum(direct_sale.discount)",
+      500.0,
+      500.0
+    ],
+    [
+      "Net revenue",
+      "Profit Reports",
+      "gross - discounts - returns",
+      62500.0,
+      78500.0
+    ],
+    [
+      "Cash closing",
+      "Cash Flow",
+      "account.balance",
+      50278.0,
+      null
+    ],
+    [
+      "Stock 12mm",
+      "Stock Summary / material.total",
+      "entries IN - OUT",
+      1000.0,
+      null
+    ],
+    [
+      "Stock 20mm",
+      "Stock Summary / material.total",
+      "entries IN - OUT",
+      370.0,
+      null
+    ],
+    [
+      "Client net balance",
+      "Client Financial Ledger",
+      "open bills total",
+      null,
+      18222.0
+    ],
+    [
+      "Supplier closing",
+      "Supplier Ledger",
+      "GRN credits - payments",
+      null,
+      149000.0
+    ],
+    [
+      "Daily due",
+      "Dashboard",
+      "same rule as due_on_delivered_goods()",
+      null,
+      15322.0
+    ],
+    [
+      "Undelivered bookings",
+      "Dashboard",
+      "client booking plan total",
+      null,
+      90000.0
+    ]
+  ]
+}

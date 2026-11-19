@@ -1,0 +1,113 @@
+{# Error logs tab — in-database errors (with reference code) plus the on-disk
+   error records, grouped so "same error ×23" collapses into one row. #}
+
+<div class="row g-3 mb-3">
+  {% for level, count in level_counts.items() %}
+    <div class="col-6 col-lg-3">
+      <div class="logs-stat {% if level in ('ERROR','CRITICAL') %}{% endif %}">
+        <span class="k">{{ level }}</span><span class="v">{{ '{:,}'.format(count) }}</span>
+      </div>
+    </div>
+  {% endfor %}
+  <div class="col-6 col-lg-3">
+    <div class="logs-stat"><span class="k">Stored 500 records</span><span class="v">{{ disk_errors|length }}</span></div>
+  </div>
+</div>
+
+<div class="ui-card mb-3">
+  <div class="ui-card-header">
+    <h5><i class="bi bi-list-columns-reverse"></i> Most frequent errors (grouped)</h5>
+    <span class="logs-count">{{ grouped_errors|length }} group{{ '' if grouped_errors|length == 1 else 's' }}</span>
+  </div>
+  <div class="ui-table-wrap">
+    <table class="ui-table">
+      <thead><tr><th class="num" style="width:70px;">×</th><th>Error</th><th>Users</th><th>First</th><th>Last</th></tr></thead>
+      <tbody>
+        {% for g in grouped_errors %}
+        <tr>
+          <td class="num"><span class="logs-pill error">{{ g.count }}</span></td>
+          <td>
+            <div class="logs-summary">{{ g.action }}</div>
+            <div class="logs-sub">{{ g.sample }}</div>
+            {% if g.reference %}<div class="logs-sub">ref <code class="logs-chip">{{ g.reference }}</code></div>{% endif %}
+          </td>
+          <td class="logs-sub">{{ g.users|join(', ') if g.users else '—' }}</td>
+          <td class="logs-when">{{ g.first.strftime('%Y-%m-%d %H:%M') if g.first else '—' }}</td>
+          <td class="logs-when">{{ g.last.strftime('%Y-%m-%d %H:%M') if g.last else '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5">
+          <div class="logs-empty"><i class="bi bi-shield-check"></i>
+            <div class="t">No application errors recorded in {{ filters.range_label|lower }}</div>
+            <div class="h">An unhandled failure appears here within a second, with the same reference code (e.g. <code>E-1a2b3c</code>) the user saw on screen.</div>
+          </div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="ui-card mb-3">
+  <div class="ui-card-header">
+    <h5><i class="bi bi-clipboard-x"></i> Error rows from the database</h5>
+    <span class="logs-count">{{ '{:,}'.format(pager.total) }} row{{ '' if pager.total == 1 else 's' }}</span>
+  </div>
+  <div class="ui-table-wrap">
+    <table class="ui-table">
+      <thead><tr><th style="width:150px;">When</th><th>Error</th><th>Where</th><th>By</th><th>Ref</th><th></th></tr></thead>
+      <tbody>
+        {% for r in pager.rows %}
+        <tr>
+          <td class="logs-when">{{ r.occurred_at.strftime('%Y-%m-%d %H:%M:%S') }}<span class="logs-age">{{ r.occurred_at | age }}</span></td>
+          <td>
+            <span class="logs-pill {{ r.result }}">{{ r.result }}</span>
+            <div class="logs-summary mt-1">{{ r.summary or r.action }}</div>
+          </td>
+          <td class="logs-sub"><code class="logs-chip">{{ r.path or '—' }}</code><div>{{ r.module or '' }}</div></td>
+          <td class="logs-sub">{{ r.username or '—' }}<div>{{ r.ip or '' }}</div></td>
+          <td class="logs-sub">{{ r.entity_label or '—' }}</td>
+          <td>
+            {% if r.after_json %}
+            <details class="logs-expand"><summary>Traceback</summary>
+              <pre class="logs-json">{{ r.after_json | prettyjson }}</pre>
+            </details>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6"><div class="logs-empty"><i class="bi bi-check2-circle"></i><div class="t">No error rows</div></div></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include 'logs/_pager.html' %}
+</div>
+
+<div class="ui-card">
+  <div class="ui-card-header">
+    <h5><i class="bi bi-hdd"></i> Structured 500 records on disk</h5>
+    <span class="logs-count"><code>instance/logs/500-errors.jsonl</code></span>
+  </div>
+  <div class="ui-card-body">
+    {% if disk_errors %}
+      <div class="logs-viewer">
+        {% for e in disk_errors %}
+          <details class="logs-expand" style="padding:4px 0;">
+            <summary>
+              <span class="logs-chip">{{ e.reference }}</span>
+              {{ e.at }} · {{ e.exception }} — {{ (e.message or '')[:110] }}
+            </summary>
+            <div class="logs-sub mt-1">{{ e.method or '' }} {{ e.path or '' }} · user {{ e.user or '—' }} · ip {{ e.ip or '—' }}</div>
+            <pre class="logs-json">{{ e.traceback or '' }}</pre>
+          </details>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="logs-empty"><i class="bi bi-file-earmark-check"></i>
+        <div class="t">The error file is empty</div>
+        <div class="h">No unhandled exception has been recorded since <code>500-errors.jsonl</code> was created.</div>
+      </div>
+    {% endif %}
+  </div>
+</div>

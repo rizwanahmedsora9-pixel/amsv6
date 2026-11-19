@@ -1,0 +1,159 @@
+{% extends "layout.html" %}
+{% from "_ui/page_header.html" import render as ui_header %}
+{% from "_ui/filter_bar.html" import bar as ui_filter_bar %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='logs.css') }}">
+<div class="ui-v2">
+
+  {% set _toolbar %}
+    <a href="{{ url_for('system.login_sessions_page') }}" class="btn btn-outline-success btn-pill btn-sm fw-bold">
+      <i class="bi bi-broadcast me-1"></i> Live logins (old view)
+    </a>
+    <a href="{{ url_for('system.settings') }}" class="btn btn-outline-secondary btn-pill btn-sm fw-bold">
+      <i class="bi bi-gear me-1"></i> Settings
+    </a>
+    <button type="button" class="btn btn-warning btn-pill btn-sm fw-bold" onclick="window.print()">
+      <i class="bi bi-printer me-1"></i> Print
+    </button>
+  {% endset %}
+  {{ ui_header('bi-journal-text', 'Logs & Activity',
+               subtitle=(tab_meta[tab][2] ~ ' · ' ~ filters.describe()), toolbar=_toolbar) }}
+
+  {# ---- Tab bar: every tab is a URL, filters travel with it -------------- #}
+  <nav class="logs-tabs" aria-label="Log sections">
+    {% for t in tabs %}
+      {% if t.key == 'users' %}<span class="logs-tab-sep" aria-hidden="true"></span>{% endif %}
+      <a class="logs-tab {% if t.key == tab %}is-active{% endif %} {% if t.key in ('errors','deleted') %}is-warn{% endif %}"
+         href="{{ t.url }}" title="{{ t.hint }}">
+        <i class="bi {{ t.icon }}"></i>
+        <span>{{ loop.index }}{% if t.key == 'users' %}{% else %}.{% endif %} {{ t.label }}</span>
+        {% if t.count is not none %}<span class="logs-tab-count">{{ '{:,}'.format(t.count) }}</span>{% endif %}
+      </a>
+    {% endfor %}
+  </nav>
+
+  {# ---- Honesty banner: what this log can and cannot show ---------------- #}
+  <div class="logs-coverage">
+    <i class="bi bi-info-circle"></i>
+    <div>
+      {% if coverage.has_data %}
+        <strong>Live capture is on.</strong>
+        Newest event {{ coverage.last_event_at.strftime('%Y-%m-%d %H:%M:%S') if coverage.last_event_at else '—' }},
+        oldest {{ coverage.first_event_at.strftime('%Y-%m-%d %H:%M') if coverage.first_event_at else '—' }} ·
+        {{ '{:,}'.format(coverage.total_events) }} events stored.
+      {% else %}
+        <strong>Capture has just been switched on — this table is empty because nothing has happened yet, not because something is broken.</strong>
+        The next save, login or page view appears here immediately. Nothing is back-filled or invented.
+      {% endif %}
+      Older history still lives in the legacy stores
+      (<code>audit_log</code>: {{ '{:,}'.format(legacy.audit_log) }} rows,
+      <code>accounting_audit_log</code>: {{ '{:,}'.format(legacy.accounting_audit_log) }} rows) —
+      those rows carry no before/after payload for sales or ops, which is why they are not merged into the tabs above.
+      {% if dropped_events %}
+        <br><strong class="text-danger">{{ dropped_events }} event(s) were dropped in this request</strong> because the database was busy.
+      {% endif %}
+    </div>
+  </div>
+
+  {# ---- Shared filter bar ------------------------------------------------ #}
+  {% if tab not in ('users',) %}
+  {% call ui_filter_bar(action=url_for('system.logs_page', tab=tab), extra_class='logs-filter-grid') %}
+    <div class="ui-field">
+      <label class="ui-label">Period</label>
+      <select name="range" class="form-select">
+        {% for key, label in range_choices %}
+          <option value="{{ key }}" {% if filters.range == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+        <option value="custom" {% if filters.range == 'custom' %}selected{% endif %}>Custom…</option>
+      </select>
+    </div>
+    {% if tab == 'all' %}
+    <div class="ui-field">
+      <label class="ui-label">Category</label>
+      <select name="category" class="form-select">
+        <option value="">Everything</option>
+        {% for key in category_options %}
+          <option value="{{ key }}" {% if filters.category == key %}selected{% endif %}>{{ key|replace('_', ' / ')|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    <div class="ui-field">
+      <label class="ui-label">From</label>
+      <input type="date" name="from" value="{{ filters.date_from_raw }}" class="form-control">
+    </div>
+    <div class="ui-field">
+      <label class="ui-label">To</label>
+      <input type="date" name="to" value="{{ filters.date_to_raw }}" class="form-control">
+    </div>
+    <div class="ui-field">
+      <label class="ui-label">User</label>
+      <select name="user" class="form-select">
+        <option value="">Anyone</option>
+        {% for u in user_options %}
+          <option value="{{ u }}" {% if filters.user == u %}selected{% endif %}>{{ u }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="ui-field">
+      <label class="ui-label">Module</label>
+      <select name="module" class="form-select">
+        <option value="">Any</option>
+        {% for m in module_options %}
+          <option value="{{ m }}" {% if filters.module == m %}selected{% endif %}>{{ m }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="ui-field">
+      <label class="ui-label">Result</label>
+      <select name="result" class="form-select">
+        <option value="">Any</option>
+        {% for r in result_options %}
+          <option value="{{ r }}" {% if filters.result == r %}selected{% endif %}>{{ r }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="ui-field ui-field-wide">
+      <label class="ui-label">Search — bill no, client, user, IP, error code, changed field…</label>
+      <input type="search" name="q" value="{{ filters.q }}" class="form-control" placeholder="e.g. SB-GEN-4412, ZHUMAR, E-1a2b3c, discount">
+    </div>
+    <div class="ui-field">
+      <label class="ui-label">Amount from</label>
+      <input type="text" inputmode="decimal" name="amount_min" value="{{ '' if filters.amount_min is none else '%.2f'|format(filters.amount_min / 100) }}" class="form-control" placeholder="0">
+    </div>
+    <div class="ui-field">
+      <label class="ui-label">Amount to</label>
+      <input type="text" inputmode="decimal" name="amount_max" value="{{ '' if filters.amount_max is none else '%.2f'|format(filters.amount_max / 100) }}" class="form-control" placeholder="any">
+    </div>
+    <div class="ui-field">
+      <label class="ui-label">Sort</label>
+      <select name="sort" class="form-select">
+        <option value="newest" {% if filters.sort == 'newest' %}selected{% endif %}>Newest first</option>
+        <option value="oldest" {% if filters.sort == 'oldest' %}selected{% endif %}>Oldest first</option>
+        <option value="amount" {% if filters.sort == 'amount' %}selected{% endif %}>Largest amount</option>
+      </select>
+    </div>
+    <div class="ui-actions">
+      <button class="btn btn-warning fw-bold"><i class="bi bi-funnel me-1"></i> Apply</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('system.logs_page', tab=tab) }}">Clear</a>
+      <a class="btn btn-outline-info" href="{{ url_for('system.logs_page', tab=tab, **{'q': filters.q, 'range': filters.range, 'user': filters.user, 'module': filters.module, 'result': filters.result, 'category': filters.category if tab == 'all' else '', 'format': 'csv'}) }}"
+         title="Export the current filter as CSV"><i class="bi bi-download me-1"></i> CSV</a>
+    </div>
+  {% endcall %}
+  {% endif %}
+
+  {# ---- Tab body -------------------------------------------------------- #}
+  {% if tab in ('all', 'logins', 'added', 'edited', 'deleted', 'views') %}
+    {% include 'logs/_tab_entries.html' %}
+  {% elif tab == 'import_export' %}
+    {% include 'logs/_tab_import_export.html' %}
+  {% elif tab == 'errors' %}
+    {% include 'logs/_tab_errors.html' %}
+  {% elif tab == 'server' %}
+    {% include 'logs/_tab_server.html' %}
+  {% elif tab == 'users' %}
+    {% include 'logs/_tab_users.html' %}
+  {% endif %}
+
+</div>
+{% endblock %}

@@ -1,0 +1,734 @@
+{% extends "layout.html" %}
+{% block content %}
+{% set safe_previous_balance = (previous_balance|default(0, true)|float) %}
+{% set safe_client_balance = (client_balance|default(0, true)|float) %}
+{% set safe_bill_amount = (bill.amount|default(0, true)|float) %}
+{% set safe_bill_paid = (bill.paid_amount|default(0, true)|float) %}
+{% macro fmt_num(v) -%}
+{{ "{:,.2f}".format((v|default(0, true)|float)).rstrip('0').rstrip('.') }}
+{%- endmacro %}
+{% set fallback_src_map = {
+    'DirectSale': 'direct_sale',
+    'Booking': 'booking',
+    'Payment': 'payment',
+    'Invoice': 'invoice',
+    'GRN': 'grn'
+} %}
+{% set resolved_src = request.args.get('src') or fallback_src_map.get(type) %}
+{% set resolved_src_id = request.args.get('src_id') or (bill.id if (bill.id is defined and bill.id and resolved_src) else None) %}
+{% set fallback_prefix_map = {'DirectSale': 'DS-', 'Booking': 'BK-', 'Payment': 'PAY-'} %}
+{% set pdf_bill_no = (bill.manual_bill_no or bill.auto_bill_no or bill.invoice_no or (bill.invoice.invoice_no if (bill.invoice is defined and bill.invoice and bill.invoice.invoice_no) else '') or ((fallback_prefix_map.get(type) ~ bill.id) if (type in fallback_prefix_map and bill.id is defined and bill.id) else '') or '') %}
+{% set bill_lang = bill_lang|default('en') %}
+{% set pdf_args = {
+    'bill_no': pdf_bill_no,
+    'src': resolved_src,
+    'src_id': resolved_src_id,
+    'client_code': request.args.get('client_code'),
+    'client_name': request.args.get('client_name'),
+    'entry_id': request.args.get('entry_id')
+} %}
+{% set pdf_download_url = url_for('download_invoice', lang='en', **pdf_args) %}
+{% set pdf_print_url = url_for('download_invoice', action='print', lang='en', **pdf_args) %}
+{% set pdf_download_url_ur = url_for('download_invoice', lang='ur', **pdf_args) %}
+{% set pdf_print_url_ur = url_for('download_invoice', action='print', lang='ur', **pdf_args) %}
+{% set co_name    = (settings.company_name    if settings and settings.company_name    else 'FAZAL BUILDING MATERIALS') %}
+{% set co_address = (settings.company_address if settings and settings.company_address else 'JALAL PUR SOBTIAN GUJRAT') %}
+{% set co_phone   = (settings.company_phone   if settings and settings.company_phone   else '+92331-0000993 | +92340-3872722') %}
+<style>
+/* ============================================================
+   RECEIPT – A5 Professional Layout
+   ============================================================ */
+.rcpt-wrapper {
+    max-width: 600px;
+    margin: 0 auto;
+    background: #fff;
+    color: #000;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 13px;
+}
+.rcpt-wrapper, .rcpt-wrapper * { color: #000 !important; }
+
+/* ---- HEADER ---- */
+.rcpt-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;          /* narrow screens: the document block drops below the company block instead of running off the edge */
+    padding: 14px 20px 10px;
+    border-bottom: 3px solid #000;
+    gap: 12px;
+}
+.rcpt-header-left { min-width: 0; }
+.rcpt-co-name {
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: -0.5px;
+    line-height: 1.1;
+    text-transform: uppercase;
+    overflow-wrap: anywhere;  /* a long company name may wrap, never push the header wide */
+}
+.rcpt-co-sub {
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 3px;
+    color: #333 !important;
+}
+.rcpt-co-phone {
+    font-size: 11px;
+    font-weight: 700;
+    margin-top: 2px;
+}
+.rcpt-header-right {
+    text-align: right;
+    max-width: 100%;
+}
+.rcpt-doc-type {
+    display: inline-block;
+    font-size: 16px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    border: 2.5px solid #000;
+    padding: 4px 12px;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+.rcpt-tx-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    border: 1px solid #000;
+    padding: 2px 7px;
+    margin-top: 4px;
+    white-space: normal;
+    max-width: 100%;
+    text-align: center;
+}
+.rcpt-doc-no {
+    font-size: 14px;
+    font-weight: 900;
+    margin-top: 5px;
+    white-space: nowrap;
+}
+.rcpt-doc-date {
+    font-size: 10px;
+    font-weight: 600;
+    margin-top: 2px;
+    color: #444 !important;
+    white-space: nowrap;
+}
+/* Manual-bill / invoice reference line and the transaction note.  They used to
+   be inline styles; a class lets the print sheet scale them like the rest. */
+.rcpt-doc-ref {
+    font-size: 11px;
+    font-weight: 700;
+    margin-top: 2px;
+}
+.rcpt-note-text {
+    font-size: 11px;
+    font-weight: 700;
+    max-width: 180px;
+}
+/* Figure columns keep a fixed share of the sheet on screen and in print. */
+.rcpt-col-qty { width: 60px; }
+.rcpt-col-rate { width: 70px; }
+.rcpt-col-amount,
+.rcpt-col-remaining { width: 80px; }
+.rcpt-col-stock,
+.rcpt-col-sent { width: 75px; }
+
+/* ---- BODY ---- */
+.rcpt-body {
+    padding: 10px 20px 6px;
+}
+.rcpt-parties {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #bbb;
+}
+.rcpt-party-label {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 2px;
+    color: #555 !important;
+}
+.rcpt-party-name {
+    font-size: 15px;
+    font-weight: 900;
+    line-height: 1.15;
+}
+.rcpt-party-sub {
+    font-size: 10px;
+    font-weight: 600;
+    margin-top: 1px;
+    color: #333 !important;
+}
+.rcpt-section-title {
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1.5px solid #000;
+    padding-bottom: 2px;
+    margin-bottom: 5px;
+    color: #222 !important;
+}
+.rcpt-detail-box {
+    border: 1px solid #bbb;
+    font-size: 11px;
+    margin-bottom: 8px;
+}
+.rcpt-detail-row {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px solid #ddd;
+    padding: 3px 8px;
+}
+.rcpt-detail-row:last-child { border-bottom: none; }
+.rcpt-detail-label { color: #444 !important; }
+.rcpt-detail-val { font-weight: 900; text-align: right; }
+.rcpt-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11.5px;
+    margin-bottom: 8px;
+}
+.rcpt-table th {
+    background: #f0f0f0 !important;
+    border: 1px solid #999;
+    padding: 4px 6px;
+    font-weight: 900;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.rcpt-table td {
+    border: 1px solid #bbb;
+    padding: 4px 6px;
+    font-weight: 700;
+}
+.rcpt-table tfoot td {
+    border: 1px solid #999;
+    padding: 4px 6px;
+    font-weight: 900;
+    background: #f8f8f8 !important;
+}
+.rcpt-table .text-end { text-align: right; }
+.rcpt-table .text-center { text-align: center; }
+.rcpt-table .text-start { text-align: left; }
+
+/* ---- FOOTER ---- */
+.rcpt-footer {
+    border-top: 3px solid #000;
+    padding: 8px 20px 12px;
+}
+.rcpt-sig-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 8px;
+}
+.rcpt-sig-block {
+    flex: 1;
+    padding-top: 8px;
+}
+.rcpt-sig-block.right-align { text-align: right; }
+.rcpt-sig-label {
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+.rcpt-sig-sub {
+    font-size: 9px;
+    color: #555 !important;
+    margin-top: 1px;
+}
+.rcpt-credits {
+    text-align: center;
+    font-size: 9.5px;
+    font-weight: 700;
+    color: #333 !important;
+    border-top: 1px dashed #aaa;
+    padding-top: 5px;
+    margin-top: 6px;
+}
+
+/* ---- TERMS & CONDITIONS (Urdu receipt only) ---- */
+.rcpt-terms {
+    border: 1px solid #bbb;
+    padding: 6px 8px;
+    margin-top: 8px;
+    page-break-inside: avoid;
+    font-size: 11px;
+}
+.rcpt-terms-title {
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+    padding-bottom: 2px;
+    border-bottom: 1px solid #999;
+    color: #222 !important;
+}
+.rcpt-term {
+    margin-bottom: 6px;
+    page-break-inside: avoid;
+}
+.rcpt-term-title {
+    font-size: 10.5px;
+    font-weight: 900;
+}
+.rcpt-term-text {
+    font-size: 10.5px;
+    line-height: 1.55;
+    text-align: justify;
+}
+
+/* ============================================================
+   SMALL SCREENS – keep the receipt header inside the page
+   (screen only: the printed/PDF sheet keeps its A5 sizes)
+   ============================================================ */
+@media screen and (max-width: 575.98px) {
+    .rcpt-header {
+        padding: 10px 12px 8px;
+        gap: 8px;
+    }
+    .rcpt-co-name { font-size: 17px; }
+    .rcpt-doc-type {
+        font-size: 13px;
+        letter-spacing: 1.5px;
+        padding: 3px 9px;
+    }
+    .rcpt-tx-badge { max-width: 100%; }
+    .rcpt-body { padding: 8px 12px 6px; }
+    .rcpt-parties {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
+    .rcpt-footer { padding: 8px 12px 10px; }
+}
+
+/* ============================================================
+   PRINT STYLES - shared with payment_receipt.html
+   ============================================================ */
+{% include 'partials/_receipt_print_css.html' %}
+</style>
+
+<!-- Screen toolbar -->
+<div class="card shadow-sm mx-auto border-0 d-print-none" style="max-width:600px; background:#fff;">
+    <div class="card-header bg-dark text-white">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h5 class="mb-0">Bill: {{ bill.manual_bill_no or bill.auto_bill_no or bill.invoice_no or '---' }}</h5>
+            <div class="d-flex gap-2 flex-wrap">
+                <div class="btn-group btn-group-sm" role="group" aria-label="English bill">
+                    <a href="{{ pdf_download_url }}" class="btn btn-warning fw-bold text-dark" title="Download the English bill as PDF">
+                        <i class="bi bi-file-earmark-pdf"></i> English PDF
+                    </a>
+                    <a href="{{ pdf_print_url }}" class="btn btn-outline-warning fw-bold" title="Print the English bill">
+                        <i class="bi bi-printer"></i> English Print
+                    </a>
+                </div>
+                <div class="btn-group btn-group-sm" role="group" aria-label="Urdu bill">
+                    <button type="button" class="btn btn-info fw-bold text-dark" data-urdu-receipt
+                            data-action="download" data-download-url="{{ pdf_download_url_ur }}"
+                            data-print-url="{{ pdf_print_url_ur }}"
+                            title="Download the Urdu bill as PDF">
+                        <i class="bi bi-file-earmark-pdf me-1"></i> Urdu PDF
+                    </button>
+                    <button type="button" class="btn btn-outline-info fw-bold" data-urdu-receipt
+                            data-action="print" data-download-url="{{ pdf_download_url_ur }}"
+                            data-print-url="{{ pdf_print_url_ur }}"
+                            title="Print the Urdu bill">
+                        <i class="bi bi-printer me-1"></i> Urdu Print
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     RECEIPT PRINT AREA
+     ============================================================ -->
+<div class="rcpt-wrapper mt-2">
+
+    <!-- HEADER -->
+    <div class="rcpt-header">
+        <div class="rcpt-header-left">
+            <div class="rcpt-co-name">{{ co_name }}</div>
+            <div class="rcpt-co-sub">{{ co_address }}</div>
+            <div class="rcpt-co-phone"><bdi dir="ltr">{{ co_phone }}</bdi></div>
+        </div>
+        <div class="rcpt-header-right">
+            <div class="rcpt-doc-type">
+                {% if type == 'Payment' %}RECEIPT
+                {% elif type == 'MaterialReturn' %}MATERIAL RETURN
+                {% elif type == 'GRN' %}GOODS RECEIVED
+                {% else %}INVOICE{% endif %}
+            </div>
+            {% if transaction_type_label %}
+            <div class="rcpt-tx-badge">{{ transaction_type_label|bill_label(bill_lang) }}</div>
+            {% endif %}
+            {% if bill.auto_bill_no is defined and bill.auto_bill_no %}
+            <div class="rcpt-doc-no">{{ bill.auto_bill_no }}</div>
+            {% endif %}
+            {% if bill.manual_bill_no is defined and bill.manual_bill_no %}
+            <div class="rcpt-doc-ref">MB: {{ bill.manual_bill_no }}</div>
+            {% elif bill.invoice_no is defined and bill.invoice_no %}
+            <div class="rcpt-doc-ref">{{ bill.invoice_no }}</div>
+            {% endif %}
+            {% if not (bill.auto_bill_no is defined and bill.auto_bill_no) and not (bill.manual_bill_no is defined and bill.manual_bill_no) %}
+            <div class="rcpt-doc-no">{{ bill.invoice_no or '---' }}</div>
+            {% endif %}
+            <div class="rcpt-doc-date">{{ (bill.date_posted if (bill.date_posted is defined and bill.date_posted) else pk_now())|bill_date(bill_lang) }}</div>
+        </div>
+    </div>
+
+    <!-- BODY -->
+    <div class="rcpt-body">
+
+        <!-- Parties -->
+        <div class="rcpt-parties">
+            <div>
+                {% if type == 'GRN' %}
+                <div class="rcpt-party-label">Supplier</div>
+                {% else %}
+                <div class="rcpt-party-label">Bill To</div>
+                {% endif %}
+                {% if type == 'GRN' %}
+                <div class="rcpt-party-name">{{ bill.supplier_name or ('N/A'|bill_label(bill_lang)) }}</div>
+                {% else %}
+                {% if bill_lang == 'ur' and client_name_ur %}
+                <div class="rcpt-party-name">{{ client_name_ur|bill_label(bill_lang) }}</div>
+                {% else %}
+                <div class="rcpt-party-name">{{ bill.client_name or (client.name if client else ('N/A'|bill_label(bill_lang))) }}</div>
+                {% endif %}
+                {% if client and client.code %}
+                <div class="rcpt-party-sub">Code: {{ client.code }}</div>
+                {% endif %}
+                {% if client and client.address %}
+                <div class="rcpt-party-sub">{{ client.address }}</div>
+                {% endif %}
+                {% if client and client.phone %}
+                <div class="rcpt-party-sub"><bdi dir="ltr">{{ client.phone }}</bdi></div>
+                {% endif %}
+                {% endif %}
+            </div>
+            {% if transaction_type_note %}
+            <div style="text-align:right;">
+                <div class="rcpt-party-label">Note</div>
+                <div class="rcpt-note-text">{{ transaction_type_note|bill_label(bill_lang) }}</div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Transaction Details (if any) -->
+        {% set bill_note = (bill.note|default('', true)|string|trim) %}
+        {% set has_tx_details =
+            (bill.method is defined and bill.method) or
+            (bill.payment_type is defined and bill.payment_type) or
+            (bill.bank_name is defined and bill.bank_name) or
+            (bill.account_name is defined and bill.account_name) or
+            (bill.account_no is defined and bill.account_no) or
+            (bill.supplier_invoice_no is defined and bill.supplier_invoice_no) or
+            (bill.driver_name is defined and bill.driver_name) or
+            (delivery_people is defined and delivery_people) or
+            (bill_note)
+        %}
+        {% if has_tx_details %}
+        <div class="rcpt-section-title">Transaction Details</div>
+        <div class="rcpt-detail-box" style="margin-bottom:8px;">
+            {% if bill.method is defined and bill.method %}
+            <div class="rcpt-detail-row"><span class="rcpt-detail-label">Method</span><span class="rcpt-detail-val">{{ bill.method|bill_label(bill_lang) }}</span></div>
+            {% endif %}
+            {% if bill.payment_type is defined and bill.payment_type %}
+            <div class="rcpt-detail-row"><span class="rcpt-detail-label">Payment Type</span><span class="rcpt-detail-val">{{ bill.payment_type|bill_label(bill_lang) }}</span></div>
+            {% endif %}
+            {% if bill.bank_name is defined and bill.bank_name %}
+            <div class="rcpt-detail-row"><span class="rcpt-detail-label">Bank</span><span class="rcpt-detail-val">{{ bill.bank_name }}</span></div>
+            {% endif %}
+            {% if bill.account_name is defined and bill.account_name %}
+            <div class="rcpt-detail-row"><span class="rcpt-detail-label">Account Name</span><span class="rcpt-detail-val">{{ bill.account_name }}</span></div>
+            {% endif %}
+            {% if bill.account_no is defined and bill.account_no %}
+            <div class="rcpt-detail-row"><span class="rcpt-detail-label">Account No.</span><span class="rcpt-detail-val">{{ bill.account_no }}</span></div>
+            {% endif %}
+            {% if delivery_people is defined and delivery_people %}
+            <div class="rcpt-detail-row"><span class="rcpt-detail-label">{{ 'Delivery Persons' if delivery_people|length > 1 else 'Delivery Person' }}</span><span class="rcpt-detail-val">{{ ", ".join(delivery_people)|bill_label(bill_lang) }}</span></div>
+            {% elif bill.driver_name is defined and bill.driver_name %}
+            <div class="rcpt-detail-row"><span class="rcpt-detail-label">Delivery Person</span><span class="rcpt-detail-val">{% if bill_lang == 'ur' and driver_name_ur %}{{ driver_name_ur|bill_label(bill_lang) }}{% else %}{{ bill.driver_name }}{% endif %}</span></div>
+            {% endif %}
+            {% if bill.supplier_invoice_no is defined and bill.supplier_invoice_no %}
+            <div class="rcpt-detail-row"><span class="rcpt-detail-label">Supplier Invoice #</span><span class="rcpt-detail-val">{{ bill.supplier_invoice_no }}</span></div>
+            {% endif %}
+            {% if bill_note %}
+            <div class="rcpt-detail-row" style="flex-direction:column; gap:2px;">
+                <span class="rcpt-detail-label">Notes</span>
+                <span style="font-weight:700;">{{ bill_note }}</span>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Items Table -->
+        <div class="rcpt-section-title">Items</div>
+        <table class="rcpt-table">
+            <thead>
+                <tr>
+                    <th class="text-start">Description / Material</th>
+                    <th class="text-end rcpt-col-qty">Qty</th>
+                    <th class="text-end rcpt-col-rate">Rate</th>
+                    <th class="text-end rcpt-col-amount">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    {% if bill_lang == 'ur' and item.name_ur %}
+                    <td class="text-start fw-bold">{{ item.name_ur|bill_label(bill_lang) }}</td>
+                    {% else %}
+                    <td class="text-start fw-bold">{{ item.name or item.material_name or item.product_name or item.mat_name }}</td>
+                    {% endif %}
+                    <td class="text-end">{{ fmt_num(item.qty) }}</td>
+                    <td class="text-end">{{ fmt_num(item.price_at_time) }}</td>
+                    <td class="text-end">{{ fmt_num((item.qty or 0) * (item.price_at_time or 0)) }}</td>
+                </tr>
+                {% endfor %}
+                {% if not items and type == 'Payment' %}
+                <tr>
+                    <td colspan="4" class="text-center" style="padding:6px; font-style:italic;">
+                        Payment Received{% if bill.method %} via {{ bill.method|bill_label(bill_lang) }}{% endif %}
+                        {% if bill.bank_name %} ({{ bill.bank_name }}){% endif %}
+                    </td>
+                </tr>
+                {% endif %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="3" class="text-end">Current Bill Total:</td>
+                    <td class="text-end">{{ fmt_num(safe_bill_amount) }}</td>
+                </tr>
+                {% set bill_discount = (bill.discount|default(0, true)|float) if (bill.discount is defined) else 0 %}
+                {% set bill_discount_reason = (bill.discount_reason|default('', true)|trim) %}
+                {% if type == 'DirectSale' %}
+                {# Receipt format required for sale receipts: keep it aligned with customer ledger balance. #}
+                {% set net_change = (safe_bill_amount - safe_bill_paid - bill_discount) %}
+                {% set total_outstanding = (safe_previous_balance + net_change) %}
+                <tr>
+                    <td colspan="3" class="text-end">Previous Balance:</td>
+                    <td class="text-end">{{ fmt_num(safe_previous_balance) }}</td>
+                </tr>
+                {% if bill_discount > 0 %}
+                <tr>
+                    <td colspan="3" class="text-end" style="white-space:nowrap;">Discount{% if bill_discount_reason %}: {{ bill_discount_reason }}{% endif %}:</td>
+                    <td class="text-end">{{ fmt_num(bill_discount) }}</td>
+                </tr>
+                {% endif %}
+                <tr>
+                    <td colspan="3" class="text-end">Paid Amount:</td>
+                    <td class="text-end">{{ fmt_num(safe_bill_paid) }}</td>
+                </tr>
+                <tr>
+                    <td colspan="3" class="text-end">Total Outstanding Balance:</td>
+                    <td class="text-end">{{ fmt_num(total_outstanding) }}</td>
+                </tr>
+                {% else %}
+                {% set show_prev_flow = (type in ['Booking', 'DirectSale', 'Invoice', 'PendingBill']) and (safe_previous_balance > 0.009) %}
+                {% if show_prev_flow %}
+                <tr>
+                    <td colspan="3" class="text-end">Previous Balance Pending:</td>
+                    <td class="text-end">{{ fmt_num(safe_previous_balance) }}</td>
+                </tr>
+                <tr>
+                    <td colspan="3" class="text-end">Total (Previous + Current):</td>
+                    <td class="text-end">{{ fmt_num(safe_previous_balance + safe_bill_amount) }}</td>
+                </tr>
+                {% endif %}
+                {% if bill_discount > 0 %}
+                <tr>
+                    <td colspan="3" class="text-end" style="white-space:nowrap;">Discount{% if bill_discount_reason %}: {{ bill_discount_reason }}{% endif %}:</td>
+                    <td class="text-end">- {{ fmt_num(bill_discount) }}</td>
+                </tr>
+                {% endif %}
+                {% if type in ['Booking', 'DirectSale', 'Invoice', 'GRN'] %}
+                <tr>
+                    <td colspan="3" class="text-end">Paid Amount:</td>
+                    <td class="text-end">- {{ fmt_num(safe_bill_paid) }}</td>
+                </tr>
+                <tr>
+                    <td colspan="3" class="text-end" style="font-size:1.05em;">
+                        {% if show_prev_flow %}Total Due (Carry Forward):{% else %}Bill Pending:{% endif %}
+                    </td>
+                    {% if type == 'GRN' %}
+                    <td class="text-end">{{ fmt_num(safe_bill_amount - safe_bill_paid) }}</td>
+                    {% elif show_prev_flow %}
+                    <td class="text-end">{{ fmt_num(safe_previous_balance + safe_bill_amount - safe_bill_paid - bill_discount) }}</td>
+                    {% else %}
+                    <td class="text-end">{{ fmt_num(safe_bill_amount - safe_bill_paid - bill_discount) }}</td>
+                    {% endif %}
+                </tr>
+                {% endif %}
+                {% endif %}
+            </tfoot>
+        </table>
+
+        {% if type == 'GRN' and grn_bd %}
+        <!-- GRN actual cost, obligations and payments -->
+        <div class="rcpt-section-title" style="margin-top:6px;">Actual Purchase Cost & Payments</div>
+        <table class="rcpt-table">
+            <tbody>
+                <tr><td colspan="3" class="text-end">Supplier Material Amount</td><td class="text-end">{{ fmt_num(grn_bd.supplier_material_amount) }}</td></tr>
+                <tr><td colspan="3" class="text-end">GRN Costs Billed to Supplier</td><td class="text-end">{{ fmt_num(grn_bd.supplier_billed_charges) }}</td></tr>
+                <tr><td colspan="3" class="text-end"><b>Supplier Ledger Bill</b></td><td class="text-end"><b>{{ fmt_num(grn_bd.supplier_bill_amount) }}</b></td></tr>
+                <tr><td colspan="3" class="text-end">Vehicle Fare</td><td class="text-end">{{ fmt_num(grn_bd.vehicle_fare) }}</td></tr>
+                <tr><td colspan="3" class="text-end">Loading</td><td class="text-end">{{ fmt_num(grn_bd.loading) }}</td></tr>
+                <tr><td colspan="3" class="text-end">Unloading</td><td class="text-end">{{ fmt_num(grn_bd.unloading) }}</td></tr>
+                <tr><td colspan="3" class="text-end">Other Charges</td><td class="text-end">{{ fmt_num(grn_bd.other_charges) }}</td></tr>
+                <tr><td colspan="3" class="text-end"><b>Total Actual Purchase Cost</b></td><td class="text-end"><b>{{ fmt_num(grn_bd.landed_cost_total) }}</b></td></tr>
+                <tr><td colspan="3" class="text-end">Average Actual Cost / Unit</td><td class="text-end">{{ fmt_num(grn_bd.average_actual_rate) }}</td></tr>
+                <tr><td colspan="3" class="text-end">Supplier Paid / Remaining</td><td class="text-end">{{ fmt_num(grn_bd.supplier_paid) }} / {{ fmt_num(grn_bd.supplier_remaining) }}</td></tr>
+                <tr><td colspan="3" class="text-end">Additional Charges Paid / Remaining</td><td class="text-end">{{ fmt_num(grn_bd.additional_paid) }} / {{ fmt_num(grn_bd.additional_remaining) }}</td></tr>
+                <tr><td colspan="3" class="text-end"><b>Total Cash Actually Paid</b></td><td class="text-end"><b>{{ fmt_num(grn_bd.total_cash_paid) }}</b></td></tr>
+            </tbody>
+        </table>
+        {% if grn_bd.obligations %}
+        <div class="rcpt-section-title" style="margin-top:6px;">Payment Obligations & History</div>
+        <table class="rcpt-table">
+            <thead><tr><th class="text-start">Recipient / Charge</th><th class="text-end">Original</th><th class="text-end">Paid</th><th class="text-end">Remaining</th></tr></thead>
+            <tbody>
+            {% for ob in grn_bd.obligations %}
+                <tr><td class="text-start">{{ ob.label|bill_label(bill_lang) }} &rarr; {{ ob.recipient_name or (ob.recipient_label|bill_label(bill_lang)) }}</td><td class="text-end">{{ fmt_num(ob.original) }}</td><td class="text-end">{{ fmt_num(ob.paid) }}</td><td class="text-end">{{ fmt_num(ob.remaining) }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        {% endif %}
+
+        <!-- Material Delivery Summary -->
+        {% if material_stock_summary %}
+        <div class="rcpt-section-title" style="margin-top:6px;">Material Delivery Summary</div>
+        <table class="rcpt-table">
+            <thead>
+                <tr>
+                    <th class="text-start">Material</th>
+                    <th class="text-end rcpt-col-stock">Prev. Stock</th>
+                    <th class="text-end rcpt-col-sent">Delivered</th>
+                    <th class="text-end rcpt-col-remaining">Remaining</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in material_stock_summary %}
+                <tr>
+                    <td class="text-start">{{ row.material or row.material_display }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(row.last_stock or 0) }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(row.dispatched or 0) }}</td>
+                    <td class="text-end">{{ "{:,.2f}".format(row.remaining or 0) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+    </div><!-- /rcpt-body -->
+
+    <!-- Terms & Conditions (Urdu receipt only) -->
+    {% if bill_lang == 'ur' and selected_terms_ur %}
+    <div class="rcpt-terms">
+        <div class="rcpt-terms-title">Terms & Conditions</div>
+        {% for term in selected_terms_ur %}
+        <div class="rcpt-term">
+            <div class="rcpt-term-title">{{ term.title|bill_label(bill_lang) }}</div>
+            <div class="rcpt-term-text"><span class="ur" lang="ur" dir="rtl">{{ term.content_ur }}</span></div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- FOOTER -->
+    <div class="rcpt-footer">
+        <div class="rcpt-sig-row">
+            <div class="rcpt-sig-block">
+                <div class="rcpt-sig-label">Receiver / Authorized Sign</div>
+                <div class="rcpt-sig-sub">Sign Here</div>
+            </div>
+            <div class="rcpt-sig-block right-align">
+                <div class="rcpt-sig-label">Company Stamp</div>
+                <div class="rcpt-sig-sub">Stamp Here</div>
+            </div>
+        </div>
+        <div class="rcpt-credits">
+            Thank you for your business! &nbsp;&bull;&nbsp; Software by AMS SYSTEM FOR EASE
+        </div>
+    </div>
+
+</div><!-- /rcpt-wrapper -->
+
+<!-- Screen bottom toolbar -->
+<div class="text-center mt-3 mb-4 d-print-none">
+    <a href="javascript:history.back()" class="btn btn-dark fw-bold me-2">Go Back</a>
+    <div class="btn-group mt-2 mt-sm-0 me-2" role="group" aria-label="English bill">
+        <a href="{{ pdf_download_url }}" class="btn btn-warning fw-bold text-dark"><i class="bi bi-file-earmark-pdf me-1"></i>English PDF</a>
+        <a href="{{ pdf_print_url }}" class="btn btn-outline-warning fw-bold"><i class="bi bi-printer me-1"></i>English Print</a>
+    </div>
+    <div class="btn-group mt-2 mt-sm-0" role="group" aria-label="Urdu bill">
+        <button type="button" class="btn btn-info fw-bold text-dark" data-urdu-receipt
+                data-action="download" data-download-url="{{ pdf_download_url_ur }}"
+                data-print-url="{{ pdf_print_url_ur }}">
+            <i class="bi bi-file-earmark-pdf me-1"></i>Urdu PDF
+        </button>
+        <button type="button" class="btn btn-outline-info fw-bold" data-urdu-receipt
+                data-action="print" data-download-url="{{ pdf_download_url_ur }}"
+                data-print-url="{{ pdf_print_url_ur }}">
+            <i class="bi bi-printer me-1"></i>Urdu Print
+        </button>
+    </div>
+</div>
+
+{% if bill.photo_path or bill.photo_url %}
+<div class="container mt-2 d-print-none" style="max-width:600px;">
+    <div class="card border-0 shadow-sm" style="background:#1e293b; border:2px solid #475569 !important; border-radius:12px;">
+        <div class="card-header bg-transparent border-secondary">
+            <h6 class="text-warning fw-bold mb-0"><i class="bi bi-images me-2"></i>Attachments</h6>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                {% if bill.photo_path %}
+                <div class="col-md-6">
+                    <div class="p-2 border border-secondary rounded bg-dark text-center">
+                        <h6 class="text-white-50 small fw-bold mb-2">UPLOADED PHOTO</h6>
+                        <img src="/static/uploads/{{ bill.photo_path }}" class="img-fluid rounded mb-2" style="max-height:180px; object-fit:contain;">
+                        <a href="/static/uploads/{{ bill.photo_path }}" target="_blank" class="btn btn-sm btn-outline-info w-100">
+                            <i class="bi bi-zoom-in me-1"></i> View Full Size
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
+                {% if bill.photo_url %}
+                <div class="col-md-6">
+                    <div class="p-2 border border-secondary rounded bg-dark text-center h-100 d-flex flex-column justify-content-center">
+                        <h6 class="text-white-50 small fw-bold mb-3">EXTERNAL LINK</h6>
+                        <i class="bi bi-google display-1 text-white-50 mb-3"></i>
+                        <a href="{{ bill.photo_url }}" target="_blank" class="btn btn-sm btn-outline-warning w-100 mt-auto">
+                            <i class="bi bi-box-arrow-up-right me-1"></i> Open URL
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% include 'partials/urdu_terms_modal.html' %}
+
+{% if auto_print %}
+{% include 'partials/_receipt_auto_print.html' %}
+{% endif %}
+{% endblock %}

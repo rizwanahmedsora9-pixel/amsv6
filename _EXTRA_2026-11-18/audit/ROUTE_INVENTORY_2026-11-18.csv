@@ -1,0 +1,619 @@
+#,Module,Endpoint,URL rule,Methods,Mutating,URL parameters,Tested in this audit,Evidence / test ID,Coverage note
+1,accounts,accounts.dashboard,/accounts/,GET,no,0,no,,
+2,accounts,accounts.account_data,/accounts/<int:account_id>/data,GET,no,1,no,,
+3,accounts,accounts.delete_account,/accounts/<int:account_id>/delete,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+4,accounts,accounts.edit_account,/accounts/<int:account_id>/edit,"GET,POST",yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+5,accounts,accounts.reconcile_account,/accounts/<int:account_id>/reconcile,"GET,POST",yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+6,accounts,accounts.toggle_account,/accounts/<int:account_id>/toggle,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+7,accounts,accounts.manage_accounts,/accounts/accounts,GET,no,0,no,,
+8,accounts,accounts.add_account,/accounts/accounts/add,"GET,POST",yes,0,yes,T-MASTER-03,exercised end-to-end through the real UI route
+9,accounts,accounts.api_add_account_category,/accounts/api/categories/add,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+10,accounts,accounts.grn_expense_payments_api,/accounts/api/grn_expense_payments/<int:grn_id>,GET,no,1,no,,
+11,accounts,accounts.grn_obligations_api,/accounts/api/grn_obligations/<int:grn_id>,GET,no,1,no,,
+12,accounts,accounts.api_client_payments_today,/accounts/api/kpi/client_payments,GET,no,0,no,,
+13,accounts,accounts.api_company_money,/accounts/api/kpi/company_money,GET,no,0,no,,
+14,accounts,accounts.api_expenditures_today,/accounts/api/kpi/expenditures,GET,no,0,no,,
+15,accounts,accounts.api_receipts_today,/accounts/api/kpi/receipts,GET,no,0,no,,
+16,accounts,accounts.api_supplier_payments_today,/accounts/api/kpi/supplier_payments,GET,no,0,no,,
+17,accounts,accounts.pay_grn_api,/accounts/api/pay_grn/<int:grn_id>,GET,no,1,yes,T-PAY-01 (helper read),exercised end-to-end through the real UI route
+18,accounts,accounts.supplier_open_obligations_api,/accounts/api/supplier_open_obligations/<int:supplier_id>,GET,no,1,no,,
+19,accounts,accounts.audit_trail,/accounts/audit,GET,no,0,no,,
+20,accounts,accounts.manage_categories,/accounts/categories,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+21,accounts,accounts.delete_account_category_route,/accounts/categories/<int:category_id>/delete,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+22,accounts,accounts.edit_account_category_route,/accounts/categories/<int:category_id>/edit,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+23,accounts,accounts.toggle_account_category_route,/accounts/categories/<int:category_id>/toggle,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+24,accounts,accounts.add_account_category,/accounts/categories/add,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+25,accounts,accounts.expenditures,/accounts/expenditures,GET,no,0,no,,
+26,accounts,accounts.grn_expenses_pay_from_modal,/accounts/grn_expenses/pay,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+27,accounts,accounts.grn_payments,/accounts/grn_payments,GET,no,0,no,,
+28,accounts,accounts.grn_payment_void,/accounts/grn_payments/<int:payment_id>/void,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+29,accounts,accounts.grn_payment_save,/accounts/grn_payments/save,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+30,accounts,accounts.kpi_bank_accounts,/accounts/kpi/bank_accounts,GET,no,0,no,,
+31,accounts,accounts.kpi_cash_accounts,/accounts/kpi/cash_accounts,GET,no,0,no,,
+32,accounts,accounts.kpi_cash_money,/accounts/kpi/cash_money,GET,no,0,no,,
+33,accounts,accounts.kpi_client_payments,/accounts/kpi/client_payments,GET,no,0,no,,
+34,accounts,accounts.kpi_company_money,/accounts/kpi/company_money,GET,no,0,no,,
+35,accounts,accounts.kpi_expenditures,/accounts/kpi/expenditures,GET,no,0,no,,
+36,accounts,accounts.kpi_receipts,/accounts/kpi/receipts,GET,no,0,no,,
+37,accounts,accounts.kpi_supplier_payments,/accounts/kpi/supplier_payments,GET,no,0,no,,
+38,accounts,accounts.account_ledger,/accounts/ledger/<int:account_id>,GET,no,1,no,,
+39,accounts,accounts.loan_register,/accounts/loans,GET,no,0,no,,
+40,accounts,accounts.delete_loan_movement,/accounts/loans/movements/<int:movement_id>/delete,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+41,accounts,accounts.edit_loan_movement,/accounts/loans/movements/<int:movement_id>/edit,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+42,accounts,accounts.add_loan_movement,/accounts/loans/movements/add,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+43,accounts,accounts.delete_loan_party_route,/accounts/loans/parties/<int:party_id>/delete,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+44,accounts,accounts.edit_loan_party,/accounts/loans/parties/<int:party_id>/edit,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+45,accounts,accounts.toggle_loan_party_route,/accounts/loans/parties/<int:party_id>/toggle,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+46,accounts,accounts.add_loan_party,/accounts/loans/parties/add,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+47,accounts,accounts.pay_grn,/accounts/pay_grn,GET,no,0,no,,
+48,accounts,accounts.pay_grn_save,/accounts/pay_grn/save,POST,yes,0,yes,T-PAY-01,exercised end-to-end through the real UI route
+49,accounts,accounts.client_payments,/accounts/payments/clients,GET,no,0,no,,
+50,accounts,accounts.client_payment_data,/accounts/payments/clients/<int:id>/data,GET,no,1,no,,
+51,accounts,accounts.client_payment_save,/accounts/payments/clients/save,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+52,accounts,accounts.client_payment_void,/accounts/payments/clients/void/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+53,accounts,accounts.supplier_payments,/accounts/payments/suppliers,GET,no,0,no,,
+54,accounts,accounts.supplier_payment_data,/accounts/payments/suppliers/<int:id>/data,GET,no,1,no,,
+55,accounts,accounts.supplier_payment_delete,/accounts/payments/suppliers/<int:id>/delete,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+56,accounts,accounts.supplier_payment_save,/accounts/payments/suppliers/save,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+57,accounts,accounts.purchase_payables,/accounts/purchase_payables,GET,no,0,no,,
+58,accounts,accounts.receipts,/accounts/receipts,GET,no,0,no,,
+59,accounts,accounts.reconciliations,/accounts/reconciliations,GET,no,0,no,,
+60,accounts,accounts.delete_account_transaction,/accounts/transactions/<int:tx_id>/delete,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+61,accounts,accounts.edit_account_transaction,/accounts/transactions/<int:tx_id>/edit,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+62,accounts,accounts.void_transaction,/accounts/transactions/<int:tx_id>/void,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+63,accounts,accounts.add_transaction,/accounts/transactions/new,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+64,accounts,accounts.transfers,/accounts/transfers,GET,no,0,no,,
+65,accounts,accounts.add_transfer,/accounts/transfers/add,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+66,activate_all_clients,activate_all_clients,/clients/activate_all,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+67,activate_all_materials,activate_all_materials,/materials/activate_all,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+68,activity_heartbeat,activity_heartbeat,/api/activity/heartbeat,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+69,activity_log_page,activity_log_page,/settings/activity,GET,no,0,no,,
+70,activity_state,activity_state,/api/activity/state,GET,no,0,no,,
+71,add_booking,add_booking,/add_booking,POST,yes,0,yes,"T-BOOK-01, T-BOOK-03",exercised end-to-end through the real UI route
+72,add_client,add_client,/add_client,POST,yes,0,yes,T-MASTER-01,exercised end-to-end through the real UI route
+73,add_client_category,add_client_category,/client-ledger/categories/add,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+74,add_delivery_person,add_delivery_person,/delivery_persons/add,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+75,add_direct_sale,add_direct_sale,/add_direct_sale,POST,yes,0,yes,"T-SALE-01..04, T-BOOK-02, F-11, F-13",exercised end-to-end through the real UI route
+76,add_material,add_material,/add_material,POST,yes,0,yes,T-MASTER-02,exercised end-to-end through the real UI route
+77,add_material_category,add_material_category,/material_categories/add,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+78,add_material_return,add_material_return,/add_material_return,POST,yes,0,yes,"T-RET-01..06, F-01, F-08",exercised end-to-end through the real UI route
+79,add_payment,add_payment,/add_payment,POST,yes,0,yes,"T-PAY-01..03, T-CSRF-01",exercised end-to-end through the real UI route
+80,add_pending_bill,add_pending_bill,/add_pending_bill,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+81,add_record,add_record,/add_record,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+82,add_sale,add_sale,/add_sale,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+83,add_service,add_service,/services/add,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+84,add_supplier,add_supplier,/add_supplier,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+85,add_supplier_payment,add_supplier_payment,/add_supplier_payment,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+86,add_user,add_user,/add_user,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+87,admin,admin.dashboard,/admin/,GET,no,0,no,,
+88,admin,admin.api_health_check,/admin/api/health,GET,no,0,no,,
+89,admin,admin.api_get_modules,/admin/api/modules,GET,no,0,no,,
+90,admin,admin.modules_list,/admin/modules,GET,no,0,no,,
+91,admin_accounts_domain_wipe,admin_accounts_domain_wipe,/admin/accounts_domain_wipe,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+92,admin_rebuild_erp_consistency,admin_rebuild_erp_consistency,/admin/rebuild_erp_consistency,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+93,api,api.api_financial_integrity_audit,/api/audit/financial-integrity,GET,no,0,no,,
+94,api,api.check_bill_api,/api/check_bill/<path:bill_no>,GET,no,1,no,,
+95,api,api.api_client_booking_status,/api/client_booking_status/<client_code>,GET,no,1,no,,
+96,api,api.api_client_financial_summary,/api/client_financial_summary/<client_code>,GET,no,1,no,,
+97,api,api.api_client_next_code,/api/client_next_code,GET,no,0,no,,
+98,api,api.api_clients_search,/api/clients/search,GET,no,0,no,,
+99,api,api.api_grn_consumption,/api/grn_consumption,GET,no,0,no,,
+100,api,api.api_last_sold_price,/api/last_sold_price,GET,no,0,no,,
+101,api,api.api_ledger_revision,/api/ledger_revision,GET,no,0,no,,
+102,api,api.api_material_next_code,/api/material_next_code,GET,no,0,no,,
+103,api,api.api_notifications_contact_history,/api/notifications/contact_history/<int:bill_id>,GET,no,1,no,,
+104,api,api.api_notifications_due,/api/notifications/due,GET,no,0,no,,
+105,api,api.api_notifications_due_ack,/api/notifications/due/ack,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+106,api,api.api_supplier_balance,/api/supplier_balance/<int:id>,GET,no,1,no,,
+107,api,api.api_suppliers_search,/api/suppliers/search,GET,no,0,no,,
+108,api,api.ui_theme_preference_api,/api/ui/theme,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+109,api_client_booking_status,api_client_booking_status,/api/client_booking_status/<client_code>,GET,no,1,no,,
+110,api_client_financial_summary,api_client_financial_summary,/api/client_financial_summary/<client_code>,GET,no,1,no,,
+111,api_client_next_code,api_client_next_code,/api/client_next_code,GET,no,0,no,,
+112,api_clients_search,api_clients_search,/api/clients/search,GET,no,0,no,,
+113,api_financial_integrity_audit,api_financial_integrity_audit,/api/audit/financial-integrity,GET,no,0,no,,
+114,api_grn_consumption,api_grn_consumption,/api/grn_consumption,GET,no,0,no,,
+115,api_last_sold_price,api_last_sold_price,/api/last_sold_price,GET,no,0,no,,
+116,api_ledger_revision,api_ledger_revision,/api/ledger_revision,GET,no,0,no,,
+117,api_material_next_code,api_material_next_code,/api/material_next_code,GET,no,0,no,,
+118,api_notifications_contact_history,api_notifications_contact_history,/api/notifications/contact_history/<int:bill_id>,GET,no,1,no,,
+119,api_notifications_due,api_notifications_due,/api/notifications/due,GET,no,0,no,,
+120,api_notifications_due_ack,api_notifications_due_ack,/api/notifications/due/ack,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+121,api_supplier_balance,api_supplier_balance,/api/supplier_balance/<int:id>,GET,no,1,no,,
+122,api_supplier_ledger_shift_preview,api_supplier_ledger_shift_preview,/api/supplier_ledger_shift_preview/<int:id>,GET,no,1,no,,
+123,api_suppliers_search,api_suppliers_search,/api/suppliers/search,GET,no,0,no,,
+124,auth,auth.login,/login,"GET,POST",yes,0,yes,T-AUTH-01 (anonymous redirect),exercised end-to-end through the real UI route
+125,auth,auth.logout,/logout,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+126,auth,auth.root_backup_settings,/root/backup-settings,GET,no,0,no,,
+127,auth,auth.root_backup_settings_history_clear,/root/backup-settings/history/clear,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+128,auth,auth.root_backup_settings_history_download,/root/backup-settings/history/download/<int:history_id>,GET,no,1,no,,
+129,auth,auth.root_backup_settings_save,/root/backup-settings/save,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+130,auth,auth.root_backup_settings_send_now,/root/backup-settings/send-now,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+131,auth,auth.root_recovery,/root/recovery,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+132,auth,auth.root_recovery_codes,/root/recovery_codes,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+133,booking_edit_modal,booking_edit_modal,/bookings/<int:booking_id>/edit-modal,GET,no,1,no,,
+134,bookings_page,bookings_page,/bookings,GET,no,0,no,,
+135,bulk_update_material_unit,bulk_update_material_unit,/bulk_update_material_unit,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+136,cash_flow,cash_flow,/cash_flow,"GET,POST",yes,0,yes,"T-REP-02, B-09",exercised end-to-end through the real UI route
+137,cash_flow_categories_meta,cash_flow_categories_meta,/cash_flow/meta/categories,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+138,cash_flow_differences,cash_flow_differences,/cash_flow_differences,GET,no,0,no,,
+139,cash_flow_entry_json,cash_flow_entry_json,/cash_flow/entry/<int:entry_id>.json,GET,no,1,no,,
+140,cash_flow_parties_meta,cash_flow_parties_meta,/cash_flow/meta/parties,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+141,cash_flow_reconciliation_detail,cash_flow_reconciliation_detail,/cash_flow_differences/<int:rec_id>,GET,no,1,no,,
+142,cash_flow_subcategories_meta,cash_flow_subcategories_meta,/cash_flow/meta/subcategories,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+143,change_password,change_password,/change_password,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+144,check_bill_api,check_bill_api,/api/check_bill/<path:bill_no>,GET,no,1,no,,
+145,client_booking_cancel,client_booking_cancel,/client_booking_cancel/<int:client_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+146,client_booking_cancel_revert,client_booking_cancel_revert,/client_booking_cancel_revert/<int:client_id>/<int:entry_id>,POST,yes,2,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+147,client_ledger,client_ledger,/client_ledger/<int:id>,GET,no,1,no,,
+148,client_ledger_qr,client_ledger_qr,/client_ledger_qr/<int:client_id>,"GET,POST",yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+149,client_ledger_qr_dialog,client_ledger_qr_dialog,/client_ledger_qr/<int:client_id>/dialog,GET,no,1,no,,
+150,client_modals,client_modals,/clients/<int:client_id>/modals,GET,no,1,no,,
+151,client_opening_balance,client_opening_balance,/client_opening_balance/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+152,client_toggle_active,client_toggle_active,/client_toggle_active/<int:client_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+153,clients,clients,/clients,GET,no,0,no,,
+154,core,core.index,/,GET,no,0,yes,"T-DAY-02, F-DUE-01, F-UND-01",exercised end-to-end through the real UI route
+155,current_payable_detail_api,current_payable_detail_api,/api/current_payables/<int:client_id>,GET,no,1,no,,
+156,current_payables_api,current_payables_api,/api/current_payables,GET,no,0,no,,
+157,daily_backup_download,daily_backup_download,/settings/daily-backup/download,GET,no,0,no,,
+158,daily_backup_run_now,daily_backup_run_now,/settings/daily-backup/run-now,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+159,daily_backup_settings,daily_backup_settings,/settings/daily-backup,GET,no,0,no,,
+160,daily_backup_settings_save,daily_backup_settings_save,/settings/daily-backup/save,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+161,daily_backup_test_email,daily_backup_test_email,/settings/daily-backup/test-email,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+162,daily_reconciliation,daily_reconciliation,/daily_reconciliation,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+163,daily_reconciliation_differences,daily_reconciliation_differences,/daily_reconciliation/differences,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+164,daily_reconciliation_resolve_difference,daily_reconciliation_resolve_difference,/daily_reconciliation/differences/<int:difference_id>/resolve,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+165,daily_transactions_redirect,daily_transactions_redirect,/daily_transactions,GET,no,0,no,,
+166,dashboard,dashboard,/legacy-migration/,GET,no,0,no,,
+167,data_lab,data_lab.upload,/data_lab/,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+168,data_lab,data_lab.view_basket,/data_lab/basket,GET,no,0,no,,
+169,data_lab,data_lab.correct_bill,/data_lab/correct_bill,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+170,data_lab,data_lab.legacy_import,/data_lab/legacy_import,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+171,data_wipe_preview,data_wipe_preview,/data_wipe_preview,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+172,debug_db,debug_db,/debug/db,GET,no,0,no,,
+173,decision_ledger,decision_ledger,/decision_ledger,GET,no,0,no,,
+174,delete_all_data,delete_all_data,/delete_all_data,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+175,delete_bill,delete_bill,/delete_bill/<string:type>/<int:id>,POST,yes,2,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+176,delete_client,delete_client,/delete_client/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+177,delete_client_category,delete_client_category,/client-ledger/categories/<int:category_id>/delete,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+178,delete_direct_sale_draft,delete_direct_sale_draft,/direct_sales/hold/<int:draft_id>/delete,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+179,delete_entry,delete_entry,/delete_entry/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+180,delete_material,delete_material,/delete_material/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+181,delete_pending_bill,delete_pending_bill,/delete_pending_bill/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+182,delete_selected_data,delete_selected_data,/delete_selected_data,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+183,delete_service,delete_service,/services/delete/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+184,delete_supplier,delete_supplier,/delete_supplier/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+185,delete_supplier_payment,delete_supplier_payment,/delete_supplier_payment/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+186,delete_term,delete_term,/settings/terms-conditions/<int:id>/delete,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+187,delete_transaction,delete_transaction,/delete_transaction/<string:type>/<int:id>,POST,yes,2,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+188,delete_user,delete_user,/delete_user/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+189,delivery_person_ledger,delivery_person_ledger,/delivery_ledger/<int:id>,GET,no,1,no,,
+190,delivery_person_ledger_api,delivery_person_ledger_api,/api/delivery_person_ledger/<int:id>,GET,no,1,no,,
+191,delivery_person_opening_balance,delivery_person_opening_balance,/delivery_person_opening_balance/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+192,delivery_person_search_api,delivery_person_search_api,/api/delivery_persons/search,GET,no,0,no,,
+193,delivery_persons_page,delivery_persons_page,/delivery_persons,GET,no,0,no,,
+194,delivery_rent_group,delivery_rent_group,/delivery_rents/group/<path:group_key>,GET,no,1,no,,
+195,delivery_rents_page,delivery_rents_page,/delivery_rents,GET,no,0,no,,
+196,direct_sale_edit_modal,direct_sale_edit_modal,/direct_sales/<int:sale_id>/edit-modal,GET,no,1,no,,
+197,direct_sales_page,direct_sales_page,/direct_sales,GET,no,0,no,,
+198,dispatching,dispatching,/dispatching,GET,no,0,no,,
+199,do_import,do_import,/legacy-migration/run/<int:run_id>/import,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+200,download,download,/legacy-migration/template/<kind>,GET,no,1,no,,
+201,download_client_clearance,download_client_clearance,/download_client_clearance/<int:id>,GET,no,1,no,,
+202,download_client_ledger,download_client_ledger,/download_client_ledger/<int:id>,GET,no,1,no,,
+203,download_delivery_person_ledger,download_delivery_person_ledger,/download_delivery_person_ledger/<int:id>,GET,no,1,no,,
+204,download_full_client_history,download_full_client_history,/download_full_client_history/<int:id>,GET,no,1,no,,
+205,download_invoice,download_invoice,/download_invoice/<path:bill_no>,GET,no,1,no,,
+206,download_supplier_ledger,download_supplier_ledger,/download_supplier_ledger/<int:id>,GET,no,1,no,,
+207,download_supplier_payment,download_supplier_payment,/download_supplier_payment/<int:payment_id>,GET,no,1,no,,
+208,dry_run,dry_run,/legacy-migration/run/<int:run_id>/dry-run,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+209,edit_booking,edit_booking,/edit_bill/Booking/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+210,edit_client,edit_client,/edit_client/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+211,edit_delivery_person,edit_delivery_person,/delivery_persons/edit/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+212,edit_delivery_person_payment,edit_delivery_person_payment,/delivery_person_payments/<int:id>/edit,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+213,edit_direct_sale,edit_direct_sale,/edit_bill/DirectSale/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+214,edit_entry,edit_entry,/edit_entry/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+215,edit_grn,edit_grn,/edit_grn/<int:id>,"GET,POST",yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+216,edit_ledger_transaction,edit_ledger_transaction,/edit_ledger_transaction/<string:trans_type>/<int:trans_id>,POST,yes,2,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+217,edit_material,edit_material,/edit_material/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+218,edit_material_return,edit_material_return,/edit_material_return/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+219,edit_payment,edit_payment,/edit_bill/Payment/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+220,edit_pending_bill,edit_pending_bill,/edit_pending_bill/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+221,edit_service,edit_service,/services/edit/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+222,edit_supplier,edit_supplier,/edit_supplier/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+223,edit_supplier_payment,edit_supplier_payment,/edit_supplier_payment/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+224,edit_user_permissions,edit_user_permissions,/edit_user_permissions/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+225,errors,errors,/legacy-migration/run/<int:run_id>/errors.xlsx,GET,no,1,no,,
+226,export_clients,export_clients,/export_clients,GET,no,0,no,,
+227,export_current_payables,export_current_payables,/export_current_payables,GET,no,0,no,,
+228,export_grn,export_grn,/export_grn,GET,no,0,no,,
+229,export_pending_bills,export_pending_bills,/export_pending_bills,GET,no,0,no,,
+230,export_unpaid_transactions,export_unpaid_transactions,/export_unpaid_transactions,GET,no,0,no,,
+231,financial_details,financial_details,/financial_details,GET,no,0,no,,
+232,financial_ledger,financial_ledger,/ledger/<int:client_id>,GET,no,1,no,,
+233,financial_ledger_details,financial_ledger_details,/financial_ledger/<int:client_id>,GET,no,1,yes,T-BOOK-03,exercised end-to-end through the real UI route
+234,financial_tracker,financial_tracker,/financial_tracker,GET,no,0,no,,
+235,fix_system_issues,fix_system_issues,/fix_system_issues,GET,no,0,no,,
+236,generate_dummy_data,generate_dummy_data,/generate_dummy_data,GET,no,0,no,,
+237,grn,grn,/grn,"GET,POST",yes,0,yes,"T-GRN-01, T-GRN-02, F-09, F-15",exercised end-to-end through the real UI route
+238,hard_delete_supplier,hard_delete_supplier,/hard_delete_supplier/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+239,hold_direct_sale,hold_direct_sale,/direct_sales/hold,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+240,import_browse_history,import_browse_history,/import_export/history,GET,no,0,no,,
+241,import_cancel_job,import_cancel_job,/import_export/jobs/<int:job_id>/cancel,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+242,import_delete_upload,import_delete_upload,/import_export/uploads/<upload_id>,DELETE,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+243,import_dispatch_data,import_dispatch_data,/import_dispatch_data,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+244,import_export,import_export.import_export_page,/import_export/,GET,no,0,no,,
+245,import_export,import_export.email_file,/import_export/email_file,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+246,import_export,import_export.execute_import,/import_export/execute_import,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+247,import_export,import_export.export_data,/import_export/export,GET,no,0,no,,
+248,import_export,import_export.export_excel_all,/import_export/export_excel_all,GET,no,0,no,,
+249,import_export,import_export.full_db_export,/import_export/full_db_export,GET,no,0,no,,
+250,import_export,import_export.full_db_import,/import_export/full_db_import,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+251,import_export,import_export.full_db_import_report,/import_export/full_db_import_report/<report_name>,GET,no,1,no,,
+252,import_export,import_export.full_raw_export,/import_export/full_raw_export,GET,no,0,no,,
+253,import_export,import_export.full_raw_import,/import_export/full_raw_import,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+254,import_export,import_export.full_raw_import_history,/import_export/full_raw_import_history,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+255,import_export,import_export.full_raw_import_history_export,/import_export/full_raw_import_history_export,GET,no,0,no,,
+256,import_export,import_export.full_raw_import_report,/import_export/full_raw_import_report/<report_name>,GET,no,1,no,,
+257,import_export,import_export.export_master,/import_export/master/export,GET,no,0,no,,
+258,import_export,import_export.import_master,/import_export/master/import,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+259,import_export,import_export.master_import_start,/import_export/master/import/start,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+260,import_export,import_export.master_import_status,/import_export/master/import/status/<job_id>,GET,no,1,no,,
+261,import_export,import_export.preview_import,/import_export/preview,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+262,import_export,import_export.get_template,/import_export/template/<dataset>,GET,no,1,no,,
+263,import_export,import_export.tenant_db_export,/import_export/tenant_db_export,GET,no,0,no,,
+264,import_export,import_export.tenant_db_restore,/import_export/tenant_db_restore,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+265,import_export,import_export.transfer_export,/import_export/transfer/export,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+266,import_export,import_export.transfer_import,/import_export/transfer/import,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+267,import_get_upload,import_get_upload,/import_export/uploads/<upload_id>,GET,no,1,no,,
+268,import_job_history,import_job_history,/import_export/jobs/<int:job_id>/history,GET,no,1,no,,
+269,import_job_progress,import_job_progress,/import_export/jobs/<int:job_id>/progress,GET,no,1,no,,
+270,import_list_uploads,import_list_uploads,/import_export/uploads,GET,no,0,no,,
+271,import_pending_bills,import_pending_bills,/import_pending_bills,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+272,import_start_job,import_start_job,/import_export/uploads/<upload_id>/start,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+273,import_upload_file,import_upload_file,/import_export/upload,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+274,index,index,/,GET,no,0,yes,"T-DAY-02, F-DUE-01, F-UND-01",exercised end-to-end through the real UI route
+275,inventory,inventory.daily_transactions,/inventory/daily_transactions,GET,no,0,yes,"T-DAY-01, F-05",exercised end-to-end through the real UI route
+276,inventory,inventory.inventory_log,/inventory/inventory_log,GET,no,0,no,,
+277,inventory,inventory.lost_ledger,/inventory/lost_ledger,GET,no,0,no,,
+278,inventory,inventory.lost_ledger_add,/inventory/lost_ledger/add,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+279,inventory,inventory.lost_ledger_delete,/inventory/lost_ledger/delete/<int:adj_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+280,inventory,inventory.lost_ledger_edit,/inventory/lost_ledger/edit/<int:adj_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+281,inventory,inventory.lost_ledger_export,/inventory/lost_ledger/export,GET,no,0,no,,
+282,inventory,inventory.lost_ledger_material_info,/inventory/lost_ledger/material_info,GET,no,0,no,,
+283,inventory,inventory.stock_summary,/inventory/stock_summary,GET,no,0,yes,T-REP-04,exercised end-to-end through the real UI route
+284,inventory,inventory.stock_summary_save_physical,/inventory/stock_summary/save_physical,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+285,ledger_page,ledger_page,/ledger,GET,no,0,no,,
+286,ledgers,ledgers.delivery_person_ledger_api,/api/delivery_person_ledger/<int:id>,GET,no,1,no,,
+287,ledgers,ledgers.delivery_person_search_api,/api/delivery_persons/search,GET,no,0,no,,
+288,ledgers,ledgers.public_client_ledger,/c/<token>,GET,no,1,no,,
+289,ledgers,ledgers.client_booking_cancel,/client_booking_cancel/<int:client_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+290,ledgers,ledgers.client_booking_cancel_revert,/client_booking_cancel_revert/<int:client_id>/<int:entry_id>,POST,yes,2,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+291,ledgers,ledgers.client_ledger,/client_ledger/<int:id>,GET,no,1,no,,
+292,ledgers,ledgers.client_ledger_qr,/client_ledger_qr/<int:client_id>,"GET,POST",yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+293,ledgers,ledgers.client_ledger_qr_dialog,/client_ledger_qr/<int:client_id>/dialog,GET,no,1,no,,
+294,ledgers,ledgers.client_toggle_active,/client_toggle_active/<int:client_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+295,ledgers,ledgers.decision_ledger,/decision_ledger,GET,no,0,no,,
+296,ledgers,ledgers.delivery_person_ledger,/delivery_ledger/<int:id>,GET,no,1,no,,
+297,ledgers,ledgers.delivery_person_ledger,/delivery_person_ledger/<int:id>,GET,no,1,no,,
+298,ledgers,ledgers.settle_delivery_person,/delivery_person_ledger/<int:id>/pay,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+299,ledgers,ledgers.delivery_person_opening_balance,/delivery_person_opening_balance/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+300,ledgers,ledgers.edit_delivery_person_payment,/delivery_person_payments/<int:id>/edit,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+301,ledgers,ledgers.void_delivery_person_payment,/delivery_person_payments/<int:id>/void,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+302,ledgers,ledgers.download_client_clearance,/download_client_clearance/<int:id>,GET,no,1,no,,
+303,ledgers,ledgers.download_client_ledger,/download_client_ledger/<int:id>,GET,no,1,no,,
+304,ledgers,ledgers.download_delivery_person_ledger,/download_delivery_person_ledger/<int:id>,GET,no,1,no,,
+305,ledgers,ledgers.download_full_client_history,/download_full_client_history/<int:id>,GET,no,1,no,,
+306,ledgers,ledgers.financial_ledger_details,/financial_ledger/<int:client_id>,GET,no,1,yes,T-BOOK-03,exercised end-to-end through the real UI route
+307,ledgers,ledgers.ledger_page,/ledger,GET,no,0,no,,
+308,ledgers,ledgers.financial_ledger,/ledger/<int:client_id>,GET,no,1,no,,
+309,ledgers,ledgers.material_ledger_page,/material_ledger/<int:mat_id>,GET,no,1,no,,
+310,legacy_migration,legacy_migration.dashboard,/legacy-migration/,GET,no,0,no,,
+311,legacy_migration,legacy_migration.preview,/legacy-migration/run/<int:run_id>,GET,no,1,no,,
+312,legacy_migration,legacy_migration.dry_run,/legacy-migration/run/<int:run_id>/dry-run,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+313,legacy_migration,legacy_migration.errors,/legacy-migration/run/<int:run_id>/errors.xlsx,GET,no,1,no,,
+314,legacy_migration,legacy_migration.do_import,/legacy-migration/run/<int:run_id>/import,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+315,legacy_migration,legacy_migration.download,/legacy-migration/template/<kind>,GET,no,1,no,,
+316,legacy_migration,legacy_migration.upload,/legacy-migration/upload,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+317,login,login,/login,"GET,POST",yes,0,yes,T-AUTH-01 (anonymous redirect),exercised end-to-end through the real UI route
+318,login_sessions_page,login_sessions_page,/settings/sessions,GET,no,0,no,,
+319,logout,logout,/logout,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+320,logs_download,logs_download,/logs/server/download/<path:filename>,GET,no,1,no,,
+321,logs_index,logs_index,/logs/,GET,no,0,no,,
+322,logs_page,logs_page,/logs/<tab>,GET,no,1,no,,
+323,lost_ledger_redirect,lost_ledger_redirect,/lost_ledger,GET,no,0,no,,
+324,manage_client_categories,manage_client_categories,/client-ledger/categories,GET,no,0,no,,
+325,masters,masters.add_client,/add_client,POST,yes,0,yes,T-MASTER-01,exercised end-to-end through the real UI route
+326,masters,masters.add_supplier,/add_supplier,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+327,masters,masters.api_supplier_ledger_shift_preview,/api/supplier_ledger_shift_preview/<int:id>,GET,no,1,no,,
+328,masters,masters.manage_client_categories,/client-ledger/categories,GET,no,0,no,,
+329,masters,masters.add_client_category,/client-ledger/categories,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+330,masters,masters.delete_client_category,/client-ledger/categories/<int:category_id>/delete,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+331,masters,masters.rename_client_category,/client-ledger/categories/<int:category_id>/rename,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+332,masters,masters.toggle_client_category,/client-ledger/categories/<int:category_id>/toggle,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+333,masters,masters.add_client_category,/client-ledger/categories/add,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+334,masters,masters.client_opening_balance,/client_opening_balance/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+335,masters,masters.clients,/clients,GET,no,0,no,,
+336,masters,masters.client_modals,/clients/<int:client_id>/modals,GET,no,1,no,,
+337,masters,masters.activate_all_clients,/clients/activate_all,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+338,masters,masters.delete_client,/delete_client/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+339,masters,masters.delete_supplier,/delete_supplier/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+340,masters,masters.delivery_persons_page,/delivery_persons,GET,no,0,no,,
+341,masters,masters.add_delivery_person,/delivery_persons/add,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+342,masters,masters.edit_delivery_person,/delivery_persons/edit/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+343,masters,masters.toggle_delivery_person,/delivery_persons/toggle/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+344,masters,masters.edit_client,/edit_client/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+345,masters,masters.edit_supplier,/edit_supplier/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+346,masters,masters.hard_delete_supplier,/hard_delete_supplier/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+347,masters,masters.materials,/materials,GET,no,0,no,,
+348,masters,masters.activate_all_materials,/materials/activate_all,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+349,masters,masters.rename_material_label,/materials/rename_label,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+350,masters,masters.reclaim_client,/reclaim_client/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+351,masters,masters.reclaim_supplier_ledger,/reclaim_supplier_ledger/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+352,masters,masters.services,/services,GET,no,0,no,,
+353,masters,masters.add_service,/services/add,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+354,masters,masters.delete_service,/services/delete/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+355,masters,masters.edit_service,/services/edit/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+356,masters,masters.merge_services,/services/merge,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+357,masters,masters.migrate_rent_to_services,/services/migrate,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+358,masters,masters.toggle_service,/services/toggle/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+359,masters,masters.shift_grn_supplier,/shift_grn_supplier/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+360,masters,masters.shift_supplier_ledger,/shift_supplier_ledger/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+361,masters,masters.shift_supplier_payment,/shift_supplier_payment/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+362,masters,masters.supplier_ledger_shift_page,/supplier_ledger_shift/<int:id>,GET,no,1,no,,
+363,masters,masters.supplier_opening_balance,/supplier_opening_balance/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+364,masters,masters.suppliers,/suppliers,GET,no,0,no,,
+365,masters,masters.transfer_client,/transfer_client/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+366,masters,masters.transfer_supplier,/transfer_supplier/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+367,material_ledger_page,material_ledger_page,/material_ledger/<int:mat_id>,GET,no,1,no,,
+368,material_returns_page,material_returns_page,/material_returns,GET,no,0,no,,
+369,materials,materials,/materials,GET,no,0,no,,
+370,merge_materials,merge_materials,/merge_materials,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+371,merge_services,merge_services,/services/merge,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+372,migrate_rent_to_services,migrate_rent_to_services,/services/migrate,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+373,misc,misc.add_material,/add_material,POST,yes,0,yes,T-MASTER-02,exercised end-to-end through the real UI route
+374,misc,misc.add_pending_bill,/add_pending_bill,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+375,misc,misc.add_supplier_payment,/add_supplier_payment,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+376,misc,misc.add_user,/add_user,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+377,misc,misc.admin_accounts_domain_wipe,/admin/accounts_domain_wipe,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+378,misc,misc.admin_rebuild_erp_consistency,/admin/rebuild_erp_consistency,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+379,misc,misc.bulk_update_material_unit,/bulk_update_material_unit,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+380,misc,misc.change_password,/change_password,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+381,misc,misc.data_wipe_preview,/data_wipe_preview,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+382,misc,misc.delete_all_data,/delete_all_data,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+383,misc,misc.delete_material,/delete_material/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+384,misc,misc.delete_pending_bill,/delete_pending_bill/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+385,misc,misc.delete_selected_data,/delete_selected_data,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+386,misc,misc.delete_supplier_payment,/delete_supplier_payment/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+387,misc,misc.delete_user,/delete_user/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+388,misc,misc.download_supplier_ledger,/download_supplier_ledger/<int:id>,GET,no,1,no,,
+389,misc,misc.download_supplier_payment,/download_supplier_payment/<int:payment_id>,GET,no,1,no,,
+390,misc,misc.edit_grn,/edit_grn/<int:id>,"GET,POST",yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+391,misc,misc.edit_material,/edit_material/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+392,misc,misc.edit_pending_bill,/edit_pending_bill/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+393,misc,misc.edit_supplier_payment,/edit_supplier_payment/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+394,misc,misc.edit_user_permissions,/edit_user_permissions/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+395,misc,misc.export_clients,/export_clients,GET,no,0,no,,
+396,misc,misc.export_grn,/export_grn,GET,no,0,no,,
+397,misc,misc.export_pending_bills,/export_pending_bills,GET,no,0,no,,
+398,misc,misc.export_unpaid_transactions,/export_unpaid_transactions,GET,no,0,no,,
+399,misc,misc.fix_system_issues,/fix_system_issues,GET,no,0,no,,
+400,misc,misc.generate_dummy_data,/generate_dummy_data,GET,no,0,no,,
+401,misc,misc.import_pending_bills,/import_pending_bills,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+402,misc,misc.rename_material_category,/material_categories/<int:id>/rename,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+403,misc,misc.toggle_material_category,/material_categories/<int:id>/toggle,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+404,misc,misc.add_material_category,/material_categories/add,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+405,misc,misc.merge_materials,/merge_materials,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+406,misc,misc.party_ledger,/party_ledger/<int:id>,GET,no,1,no,,
+407,misc,misc.pay_supplier_page,/pay_supplier,GET,no,0,no,,
+408,misc,misc.reconcile_data,/reconcile_data,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+409,misc,misc.terms_conditions,/settings/terms-conditions,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+410,misc,misc.delete_term,/settings/terms-conditions/<int:id>/delete,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+411,misc,misc.toggle_term,/settings/terms-conditions/<int:id>/toggle,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+412,misc,misc.supplier_ledger,/supplier_ledger/<int:id>,GET,no,1,no,,
+413,misc,misc.system_report,/system_report,GET,no,0,yes,"T-INT-01, F-10",exercised end-to-end through the real UI route
+414,misc,misc.toggle_bill_paid,/toggle_bill_paid/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+415,misc,misc.toggle_user_status,/toggle_user_status/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+416,misc,misc.update_settings,/update_settings,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+417,misc,misc.uploaded_file,/uploads/<path:filename>,GET,no,1,no,,
+418,mixed_transactions,mixed_transactions,/mixed_transactions,GET,no,0,no,,
+419,notifications_ack_reminder,notifications_ack_reminder,/notifications/ack_reminder/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+420,notifications_add_email,notifications_add_email,/notifications/add_email,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+421,notifications_bill_detail,notifications_bill_detail,/notifications/bill/<int:bill_id>,GET,no,1,no,,
+422,notifications_close_reminder,notifications_close_reminder,/notifications/close_reminder/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+423,notifications_delete_email,notifications_delete_email,/notifications/delete_email/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+424,notifications_log_contact,notifications_log_contact,/notifications/log_contact/<int:bill_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+425,notifications_mark_paid,notifications_mark_paid,/notifications/mark_paid/<int:bill_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+426,notifications_page,notifications_page,/notifications,GET,no,0,no,,
+427,notifications_resolve_due,notifications_resolve_due,/notifications/resolve_due/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+428,notifications_set_reminder,notifications_set_reminder,/notifications/set_reminder/<int:bill_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+429,notifications_set_severity,notifications_set_severity,/notifications/set_severity/<int:bill_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+430,notifications_toggle_email,notifications_toggle_email,/notifications/toggle_email/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+431,notifications_upcoming,notifications_upcoming,/notifications/upcoming,GET,no,0,no,,
+432,ops,ops.add_record,/add_record,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+433,ops,ops.delete_entry,/delete_entry/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+434,ops,ops.delivery_rents_page,/delivery_rents,GET,no,0,no,,
+435,ops,ops.delivery_rent_group,/delivery_rents/group/<path:group_key>,GET,no,1,no,,
+436,ops,ops.pay_delivery_rent,/delivery_rents/pay/<int:alloc_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+437,ops,ops.pay_delivery_person_rent,/delivery_rents/pay_driver/<int:person_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+438,ops,ops.void_delivery_rent,/delivery_rents/void/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+439,ops,ops.dispatching,/dispatching,GET,no,0,no,,
+440,ops,ops.edit_entry,/edit_entry/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+441,ops,ops.grn,/grn,"GET,POST",yes,0,yes,"T-GRN-01, T-GRN-02, F-09, F-15",exercised end-to-end through the real UI route
+442,ops,ops.import_dispatch_data,/import_dispatch_data,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+443,ops,ops.tracking,/tracking,GET,no,0,no,,
+444,party_ledger,party_ledger,/party_ledger/<int:id>,GET,no,1,no,,
+445,pay_delivery_person_rent,pay_delivery_person_rent,/delivery_rents/pay_driver/<int:person_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+446,pay_delivery_rent,pay_delivery_rent,/delivery_rents/pay/<int:alloc_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+447,pay_supplier_page,pay_supplier_page,/pay_supplier,GET,no,0,no,,
+448,payments_page,payments_page,/payments,GET,no,0,no,,
+449,pending_bill_modals,pending_bill_modals,/pending_bills/<int:bill_id>/modals,GET,no,1,no,,
+450,pending_bills,pending_bills,/pending_bills,GET,no,0,no,,
+451,preview,preview,/legacy-migration/run/<int:run_id>,GET,no,1,no,,
+452,profit_report_excel,profit_report_excel,/profit_reports/export/excel,GET,no,0,no,,
+453,profit_report_pdf,profit_report_pdf,/profit_reports/export/pdf,GET,no,0,no,,
+454,profit_reports,profit_reports,/profit_reports,GET,no,0,yes,"T-REP-01, B-01",exercised end-to-end through the real UI route
+455,profit_transaction_detail,profit_transaction_detail,/profit_reports/transaction/<string:document_type>/<int:document_id>,GET,no,2,no,,
+456,public_client_ledger,public_client_ledger,/c/<token>,GET,no,1,no,,
+457,recent_errors_feed,recent_errors_feed,/debug/recent_errors,GET,no,0,no,,
+458,reclaim_client,reclaim_client,/reclaim_client/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+459,reclaim_supplier_ledger,reclaim_supplier_ledger,/reclaim_supplier_ledger/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+460,reconcile_data,reconcile_data,/reconcile_data,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+461,rename_client_category,rename_client_category,/client-ledger/categories/<int:category_id>/rename,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+462,rename_material_category,rename_material_category,/material_categories/<int:id>/rename,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+463,rename_material_label,rename_material_label,/materials/rename_label,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+464,reports,reports.current_payables_api,/api/current_payables,GET,no,0,no,,
+465,reports,reports.current_payable_detail_api,/api/current_payables/<int:client_id>,GET,no,1,no,,
+466,reports,reports.cash_flow,/cash_flow,"GET,POST",yes,0,yes,"T-REP-02, B-09",exercised end-to-end through the real UI route
+467,reports,reports.cash_flow_entry_json,/cash_flow/entry/<int:entry_id>.json,GET,no,1,no,,
+468,reports,reports.cash_flow_categories_meta,/cash_flow/meta/categories,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+469,reports,reports.cash_flow_parties_meta,/cash_flow/meta/parties,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+470,reports,reports.cash_flow_subcategories_meta,/cash_flow/meta/subcategories,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+471,reports,reports.cash_flow_differences,/cash_flow_differences,GET,no,0,no,,
+472,reports,reports.cash_flow_reconciliation_detail,/cash_flow_differences/<int:rec_id>,GET,no,1,no,,
+473,reports,reports.unpaid_transactions_page,/current_payables,GET,no,0,yes,F-04,exercised end-to-end through the real UI route
+474,reports,reports.daily_reconciliation,/daily_reconciliation,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+475,reports,reports.daily_reconciliation_differences,/daily_reconciliation/differences,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+476,reports,reports.daily_reconciliation_resolve_difference,/daily_reconciliation/differences/<int:difference_id>/resolve,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+477,reports,reports.daily_transactions_redirect,/daily_transactions,GET,no,0,no,,
+478,reports,reports.export_current_payables,/export_current_payables,GET,no,0,no,,
+479,reports,reports.financial_details,/financial_details,GET,no,0,no,,
+480,reports,reports.financial_tracker,/financial_tracker,GET,no,0,no,,
+481,reports,reports.lost_ledger_redirect,/lost_ledger,GET,no,0,no,,
+482,reports,reports.profit_reports,/profit_reports,GET,no,0,yes,"T-REP-01, B-01",exercised end-to-end through the real UI route
+483,reports,reports.profit_report_excel,/profit_reports/export/excel,GET,no,0,no,,
+484,reports,reports.profit_report_pdf,/profit_reports/export/pdf,GET,no,0,no,,
+485,reports,reports.profit_transaction_detail,/profit_reports/transaction/<string:document_type>/<int:document_id>,GET,no,2,no,,
+486,reports,reports.stock_summary_redirect,/stock_summary,GET,no,0,no,,
+487,reports,reports.unpaid_transactions_page,/unpaid_transactions,GET,no,0,no,,
+488,resume_direct_sale_draft,resume_direct_sale_draft,/direct_sales/hold/<int:draft_id>/resume,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+489,root_backup_settings,root_backup_settings,/root/backup-settings,GET,no,0,no,,
+490,root_backup_settings_history_clear,root_backup_settings_history_clear,/root/backup-settings/history/clear,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+491,root_backup_settings_history_download,root_backup_settings_history_download,/root/backup-settings/history/download/<int:history_id>,GET,no,1,no,,
+492,root_backup_settings_save,root_backup_settings_save,/root/backup-settings/save,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+493,root_backup_settings_send_now,root_backup_settings_send_now,/root/backup-settings/send-now,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+494,root_recovery,root_recovery,/root/recovery,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+495,root_recovery_codes,root_recovery_codes,/root/recovery_codes,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+496,sales,sales.add_booking,/add_booking,POST,yes,0,yes,"T-BOOK-01, T-BOOK-03",exercised end-to-end through the real UI route
+497,sales,sales.add_direct_sale,/add_direct_sale,POST,yes,0,yes,"T-SALE-01..04, T-BOOK-02, F-11, F-13",exercised end-to-end through the real UI route
+498,sales,sales.add_material_return,/add_material_return,POST,yes,0,yes,"T-RET-01..06, F-01, F-08",exercised end-to-end through the real UI route
+499,sales,sales.add_payment,/add_payment,POST,yes,0,yes,"T-PAY-01..03, T-CSRF-01",exercised end-to-end through the real UI route
+500,sales,sales.add_sale,/add_sale,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+501,sales,sales.verify_bill_short,/b/<token>,GET,no,1,no,,
+502,sales,sales.verify_bill_pdf,/b/<token>.pdf,GET,no,1,no,,
+503,sales,sales.bookings_page,/bookings,GET,no,0,no,,
+504,sales,sales.booking_edit_modal,/bookings/<int:booking_id>/edit-modal,GET,no,1,no,,
+505,sales,sales.delete_bill,/delete_bill/<string:type>/<int:id>,POST,yes,2,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+506,sales,sales.delete_transaction,/delete_transaction/<string:type>/<int:id>,POST,yes,2,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+507,sales,sales.direct_sales_page,/direct_sales,GET,no,0,no,,
+508,sales,sales.direct_sale_edit_modal,/direct_sales/<int:sale_id>/edit-modal,GET,no,1,no,,
+509,sales,sales.hold_direct_sale,/direct_sales/hold,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+510,sales,sales.delete_direct_sale_draft,/direct_sales/hold/<int:draft_id>/delete,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+511,sales,sales.resume_direct_sale_draft,/direct_sales/hold/<int:draft_id>/resume,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+512,sales,sales.download_invoice,/download_invoice/<path:bill_no>,GET,no,1,no,,
+513,sales,sales.edit_booking,/edit_bill/Booking/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+514,sales,sales.edit_direct_sale,/edit_bill/DirectSale/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+515,sales,sales.edit_payment,/edit_bill/Payment/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+516,sales,sales.edit_ledger_transaction,/edit_ledger_transaction/<string:trans_type>/<int:trans_id>,POST,yes,2,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+517,sales,sales.edit_material_return,/edit_material_return/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+518,sales,sales.material_returns_page,/material_returns,GET,no,0,no,,
+519,sales,sales.mixed_transactions,/mixed_transactions,GET,no,0,no,,
+520,sales,sales.payments_page,/payments,GET,no,0,no,,
+521,sales,sales.pending_bills,/pending_bills,GET,no,0,no,,
+522,sales,sales.pending_bill_modals,/pending_bills/<int:bill_id>/modals,GET,no,1,no,,
+523,sales,sales.verify_bill,/verify/bill/<token>,GET,no,1,no,,
+524,sales,sales.verify_bill_pdf,/verify/bill/<token>.pdf,GET,no,1,no,,
+525,sales,sales.view_bill,/view_bill/<path:bill_no>,GET,no,1,no,,
+526,sales,sales.view_bill_detail,/view_bill_detail/<string:type>/<int:id>,GET,no,2,no,,
+527,sales,sales.void_transaction,/void_transaction/<string:type>/<int:id>,POST,yes,2,yes,"T-VOID-01, F-07",exercised end-to-end through the real UI route
+528,services,services,/services,GET,no,0,no,,
+529,settings,settings,/settings,GET,no,0,no,,
+530,settle_delivery_person,settle_delivery_person,/delivery_person_ledger/<int:id>/pay,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+531,shift_grn_supplier,shift_grn_supplier,/shift_grn_supplier/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+532,shift_supplier_ledger,shift_supplier_ledger,/shift_supplier_ledger/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+533,shift_supplier_payment,shift_supplier_payment,/shift_supplier_payment/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+534,sidebar_settings_page,sidebar_settings_page,/settings/sidebar,GET,no,0,no,,
+535,sidebar_settings_reset,sidebar_settings_reset,/settings/sidebar/reset,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+536,sidebar_settings_save,sidebar_settings_save,/settings/sidebar/save,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+537,stock_summary_redirect,stock_summary_redirect,/stock_summary,GET,no,0,no,,
+538,supplier_ledger,supplier_ledger,/supplier_ledger/<int:id>,GET,no,1,no,,
+539,supplier_ledger_shift_page,supplier_ledger_shift_page,/supplier_ledger_shift/<int:id>,GET,no,1,no,,
+540,supplier_opening_balance,supplier_opening_balance,/supplier_opening_balance/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+541,suppliers,suppliers,/suppliers,GET,no,0,no,,
+542,system,system.activity_heartbeat,/api/activity/heartbeat,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+543,system,system.activity_state,/api/activity/state,GET,no,0,no,,
+544,system,system.debug_db,/debug/db,GET,no,0,no,,
+545,system,system.recent_errors_feed,/debug/recent_errors,GET,no,0,no,,
+546,system,system.logs_index,/logs,GET,no,0,no,,
+547,system,system.logs_index,/logs/,GET,no,0,no,,
+548,system,system.logs_page,/logs/<tab>,GET,no,1,no,,
+549,system,system.logs_download,/logs/server/download/<path:filename>,GET,no,1,no,,
+550,system,system.notifications_page,/notifications,GET,no,0,no,,
+551,system,system.notifications_ack_reminder,/notifications/ack_reminder/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+552,system,system.notifications_add_email,/notifications/add_email,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+553,system,system.notifications_bill_detail,/notifications/bill/<int:bill_id>,GET,no,1,no,,
+554,system,system.notifications_close_reminder,/notifications/close_reminder/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+555,system,system.notifications_delete_email,/notifications/delete_email/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+556,system,system.notifications_log_contact,/notifications/log_contact/<int:bill_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+557,system,system.notifications_mark_paid,/notifications/mark_paid/<int:bill_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+558,system,system.notifications_resolve_due,/notifications/resolve_due/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+559,system,system.notifications_set_reminder,/notifications/set_reminder/<int:bill_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+560,system,system.notifications_set_severity,/notifications/set_severity/<int:bill_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+561,system,system.notifications_toggle_email,/notifications/toggle_email/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+562,system,system.notifications_upcoming,/notifications/upcoming,GET,no,0,no,,
+563,system,system.settings,/settings,GET,no,0,no,,
+564,system,system.activity_log_page,/settings/activity,GET,no,0,no,,
+565,system,system.daily_backup_settings,/settings/daily-backup,GET,no,0,no,,
+566,system,system.daily_backup_download,/settings/daily-backup/download,GET,no,0,no,,
+567,system,system.daily_backup_run_now,/settings/daily-backup/run-now,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+568,system,system.daily_backup_settings_save,/settings/daily-backup/save,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+569,system,system.daily_backup_test_email,/settings/daily-backup/test-email,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+570,system,system.login_sessions_page,/settings/sessions,GET,no,0,no,,
+571,system,system.sidebar_settings_page,/settings/sidebar,GET,no,0,no,,
+572,system,system.sidebar_settings_reset,/settings/sidebar/reset,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+573,system,system.sidebar_settings_save,/settings/sidebar/save,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+574,system,system.tenants_dashboard,/tenants,GET,no,0,no,,
+575,system,system.tenants_backup_history,/tenants/<tenant_id>/backup_history,GET,no,1,no,,
+576,system,system.tenants_delete,/tenants/<tenant_id>/delete,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+577,system,system.tenants_reset_admin,/tenants/<tenant_id>/reset_admin,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+578,system,system.tenants_reset_missing_passwords,/tenants/<tenant_id>/reset_missing_passwords,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+579,system,system.tenants_update_status,/tenants/<tenant_id>/status,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+580,system,system.tenants_update,/tenants/<tenant_id>/update,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+581,system,system.tenants_backup_history_download,/tenants/backup_history/download/<int:history_id>,GET,no,1,no,,
+582,system,system.tenants_backup_history_restore,/tenants/backup_history/restore/<int:history_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+583,system,system.tenants_create,/tenants/create,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+584,system_report,system_report,/system_report,GET,no,0,yes,"T-INT-01, F-10",exercised end-to-end through the real UI route
+585,tenants_backup_history,tenants_backup_history,/tenants/<tenant_id>/backup_history,GET,no,1,no,,
+586,tenants_backup_history_download,tenants_backup_history_download,/tenants/backup_history/download/<int:history_id>,GET,no,1,no,,
+587,tenants_backup_history_restore,tenants_backup_history_restore,/tenants/backup_history/restore/<int:history_id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+588,tenants_create,tenants_create,/tenants/create,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+589,tenants_dashboard,tenants_dashboard,/tenants,GET,no,0,no,,
+590,tenants_delete,tenants_delete,/tenants/<tenant_id>/delete,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+591,tenants_reset_admin,tenants_reset_admin,/tenants/<tenant_id>/reset_admin,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+592,tenants_reset_missing_passwords,tenants_reset_missing_passwords,/tenants/<tenant_id>/reset_missing_passwords,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+593,tenants_update,tenants_update,/tenants/<tenant_id>/update,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+594,tenants_update_status,tenants_update_status,/tenants/<tenant_id>/status,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+595,terms_conditions,terms_conditions,/settings/terms-conditions,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+596,toggle_bill_paid,toggle_bill_paid,/toggle_bill_paid/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+597,toggle_client_category,toggle_client_category,/client-ledger/categories/<int:category_id>/toggle,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+598,toggle_delivery_person,toggle_delivery_person,/delivery_persons/toggle/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+599,toggle_material_category,toggle_material_category,/material_categories/<int:id>/toggle,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+600,toggle_service,toggle_service,/services/toggle/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+601,toggle_term,toggle_term,/settings/terms-conditions/<int:id>/toggle,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+602,toggle_user_status,toggle_user_status,/toggle_user_status/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+603,tracking,tracking,/tracking,GET,no,0,no,,
+604,transfer_client,transfer_client,/transfer_client/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+605,transfer_supplier,transfer_supplier,/transfer_supplier/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+606,ui_theme_preference_api,ui_theme_preference_api,/api/ui/theme,"GET,POST",yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+607,unpaid_transactions_page,unpaid_transactions_page,/current_payables,GET,no,0,yes,F-04,exercised end-to-end through the real UI route
+608,update_settings,update_settings,/update_settings,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+609,upload,upload,/legacy-migration/upload,POST,yes,0,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+610,uploaded_file,uploaded_file,/uploads/<path:filename>,GET,no,1,no,,
+611,verify_bill,verify_bill,/verify/bill/<token>,GET,no,1,no,,
+612,verify_bill_pdf,verify_bill_pdf,/verify/bill/<token>.pdf,GET,no,1,no,,
+613,verify_bill_short,verify_bill_short,/b/<token>,GET,no,1,no,,
+614,view_bill,view_bill,/view_bill/<path:bill_no>,GET,no,1,no,,
+615,view_bill_detail,view_bill_detail,/view_bill_detail/<string:type>/<int:id>,GET,no,2,no,,
+616,void_delivery_person_payment,void_delivery_person_payment,/delivery_person_payments/<int:id>/void,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+617,void_delivery_rent,void_delivery_rent,/delivery_rents/void/<int:id>,POST,yes,1,no,,NOT EXERCISED - destructive/administrative; deferred (see report part 10)
+618,void_transaction,void_transaction,/void_transaction/<string:type>/<int:id>,POST,yes,2,yes,"T-VOID-01, F-07",exercised end-to-end through the real UI route

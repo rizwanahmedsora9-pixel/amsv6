@@ -1,0 +1,73 @@
+AMS v5.2 — MASTER ERP AUDIT · 2026-11-18 · AUDIT ONLY (no fixes applied)
+================================================================================
+
+VERDICT: CONDITIONAL RELEASE — NOT READY FOR UNSUPERVISED DAILY USE
+
+The books are right; the dashboards are not, and the write paths are unprotected.
+Of 17 financial reconciliations, 12 tie exactly to the cent (cash flow, profit,
+COGS, supplier ledger, stock, customer ledger) and 4 fail — all four inside one
+reporting rule. Of 33 recorded tests: 18 PASS, 12 FAIL, 1 PARTIAL, 2 INFO.
+Of 15 findings: 0 CRITICAL, 7 HIGH, 5 MEDIUM, 2 LOW, 1 INFO.
+
+WHAT WORKS (evidence-backed)
+  - Cash flow closes to the ledger: 50,000 + 60,278 - 60,000 = 50,278 = account balance.
+  - Profit report: net revenue 78,500, COGS 55,600 (FIFO landed cost incl. 5,000
+    capitalised freight), net profit 22,900 — matched an independent recomputation.
+  - Supplier ledger 209,000 credited - 60,000 paid = 149,000. GRNs never self-pay.
+  - Stock 1,990 in - 620 out = 1,370 = material totals. No drift, no negative stock.
+  - Customer ledger: 47,100 due - 28,878 paid = 18,222, undelivered 30,000 held apart.
+  - Guards work: oversell blocked, over-return blocked with the exact maximum,
+    duplicate sale and duplicate receipt rejected (idempotency), anonymous access
+    redirected to login on all 9 probed routes, DB integrity_check ok, 0 FK violations.
+
+WHAT FAILS (7 HIGH)
+  F-01 Return credit settles the client's OLDEST bill, not the bill returned.
+       1,600 credit note for bill B landed on bill A (5,722 -> 4,122); A and B untouched.
+  F-02 Dashboard "Daily Due" drops a delivered booking's value (15,322 shown vs 31,322 due).
+  F-03 Dashboard "Undelivered Bookings" = client value x number of bookings (90,000 vs 30,000).
+  F-04 "Total Outstanding / Current Payables" 48,222 vs the client ledger's 18,222 —
+       the whole undelivered booking book is counted as a receivable.
+  F-05 Daily Breakdown "Payments" 23,878 counts 13,100 of return credit notes as payments.
+  F-06 No CSRF anywhere: a payment POST with no token was accepted and moved real balances.
+  F-07 "Void transaction" HARD-DELETES the posted sale, items, stock entry and bill.
+
+MEDIUM
+  F-08 Cash/walk-in sale cannot be returned (client master required).
+  F-09 "No charges on this GRN" flash after 5,000 of charges were saved and capitalised.
+  F-10 Integrity Audit false-positives on its own booking-delivery flow; misses F-02/03/04.
+  F-11 Booking-delivery sale stored with amount 0 and no cost rate; receivable not settled.
+  F-12 4 GRN stock movements carry no source linkage.
+LOW / INFO
+  F-13 Fully paid cash sale still creates a zero-amount pending bill.
+  F-14 "Daily Cash Received" tile label hides that it excludes separately-posted receipts.
+  F-15 Legacy GRN cost fields accepted and silently ignored.
+
+REGRESSION RECHECK OF B-01..B-09
+  PASS     B-01 profit arithmetic · B-02 return reversal · B-09 cash flow / no double expense
+  PARTIAL  B-06 client ledger (correct) vs payables/dashboard (not) · B-08 integrity audit
+  FAIL     B-03 dashboard booking split · B-04 credit-note linkage · B-05 walk-in returns
+           · B-07 daily payment classification
+  No regression was introduced in the previously repaired areas.
+
+FIX FIRST (P0, small localised changes, exact repro in the register)
+  1. Enable CSRFProtect app-wide (F-06).
+  2. Link a return to the sale it returns; FIFO only for the remainder (F-01).
+  3. Define "receivable" once and use it in /current_payables, the dashboard and the
+     client ledger; undelivered bookings must not be receivables (F-02, F-03, F-04).
+  4. Reuse the dashboard's cash-receipt filter in the Daily Breakdown tile (F-05).
+
+NOT TESTED (do not assume healthy): expenses/expenditure posting (BLOCKED, endpoint 405),
+bill/payment edit, GRN void, loans/udhaar, delivery rents, import/export, legacy
+migration, backups/wipe, PDF/print/QR/Urdu, non-admin roles, concurrency/load,
+multi-company. ~595 of 618 routes were never called.
+
+ISOLATION: app copied to AUDIT_2026-11-18/app_under_test; tests ran only against
+AUDIT_2026-11-18/test_db/audit_test.db. No production DB touched (AMSV5-2/instance DB
+still 0 sales / 0 entries, md5 124f7a31809e32061d370f7c93e2d7d4). No SQL used to
+manufacture data — every transaction came through the real forms. No source edited.
+
+Deliverables: MASTER_ERP_AUDIT_2026-11-18.md · BUG_REGISTER_2026-11-18.csv (15) ·
+TEST_RESULTS_2026-11-18.csv (33) · ROUTE_INVENTORY_2026-11-18.csv (618) ·
+FINANCIAL_RECONCILIATION_2026-11-18.csv (17) · REGRESSION_RECHECK_2026-11-18.csv (9) ·
+evidence/ · tools/
+================================================================================

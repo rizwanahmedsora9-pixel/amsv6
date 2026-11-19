@@ -1,0 +1,849 @@
+diff -ruN a/app/blueprints/core.py b/app/blueprints/core.py
+--- a/app/blueprints/core.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/blueprints/core.py	2026-11-18 13:46:14.000000000 +0000
+@@ -101,6 +101,18 @@
+     payable_report = build_current_payables(status='outstanding', page=1, per_page=200)
+     total_outstanding = float(payable_report.get('total_outstanding') or 0)
+ 
++    # The tile above is a NET client-ledger figure: a client holding an
++    # unallocated advance nets to zero even though their bills are still open,
++    # so the old label ("Real dues across open bills") was simply untrue and
++    # read 0.00 while 17,500 of bills were outstanding.  The gross figure is
++    # published next to it, from the same pending-bill rows the unpaid-bills
++    # screen lists.
++    open_bill_total = round(float(
++        db.session.query(func.coalesce(func.sum(PendingBill.amount), 0.0))
++        .filter(PendingBill.is_void == False, PendingBill.is_paid == False)  # noqa: E712
++        .scalar() or 0
++    ), 2)
++
+     # Daily Sales Breakdown
+     sales_breakdown = {}
+ 
+@@ -140,6 +152,7 @@
+                            daily_credit=daily_credit,
+                            daily_undelivered=daily_undelivered,
+                            total_outstanding=total_outstanding,
++                           open_bill_total=open_bill_total,
+                            sales_breakdown=sales_breakdown_list)
+ 
+ 
+diff -ruN a/app/blueprints/ledgers/booking_cancel.py b/app/blueprints/ledgers/booking_cancel.py
+--- a/app/blueprints/ledgers/booking_cancel.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/blueprints/ledgers/booking_cancel.py	2026-11-18 13:45:13.000000000 +0000
+@@ -101,17 +101,20 @@
+             note=f"Booking cancellation|rate={rate:.6f}|amount={amount:.6f}"
+         ))
+         new_qty = float(item.qty or 0) - remaining_qty
+-        if new_qty <= 0:
++        # The line is never deleted: a cancelled booking must still show what
++        # was ordered (material, rate, ordered quantity).  ``qty`` drops to the
++        # undelivered remainder so every money figure stays exact, and
++        # ``cancelled_qty`` records what was taken off.
++        item.qty = max(0.0, new_qty)
++        item.cancelled_qty = float(item.cancelled_qty or 0) + remaining_qty
++        if item.qty <= 0:
+             # Only void historical links can remain after the active-allocation
+-            # preflight. Preserve them before deleting their parent line.
++            # preflight; archive them so the cancelled line keeps a clean trail.
+             old_allocations = BookingAllocation.query.filter_by(booking_item_id=item.id).all()
+             archive_and_delete_booking_allocations(
+                 old_allocations,
+-                reason='booking cancellation deleted an unconsumed source booking line',
++                reason='booking cancellation cleared an unconsumed source booking line',
+             )
+-            db.session.delete(item)
+-        else:
+-            item.qty = new_qty
+         if booking:
+             touched_bookings.add(booking)
+ 
+diff -ruN a/app/blueprints/masters/add_client.py b/app/blueprints/masters/add_client.py
+--- a/app/blueprints/masters/add_client.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/blueprints/masters/add_client.py	2026-11-18 13:46:02.000000000 +0000
+@@ -22,7 +22,22 @@
+     if not category:
+         flash('Select a valid category from the client ledger categories', 'danger')
+         return redirect(url_for('clients'))
+-    opening_balance = _to_float_or_zero(request.form.get('opening_balance', 0))
++    # An opening balance is money.  It used to be coerced with a helper that
++    # silently turns unparseable text into 0.0, so typing "abc" or "5,000" cost
++    # the client's whole opening balance with a green "Client Registered" flash.
++    raw_opening = (request.form.get('opening_balance') or '').strip()
++    opening_balance = 0.0
++    if raw_opening:
++        cleaned = raw_opening.replace(',', '').replace('\u20b9', '').strip()
++        try:
++            opening_balance = float(cleaned)
++        except (TypeError, ValueError):
++            flash(
++                f'Opening balance "{raw_opening}" is not a number. Enter a figure such as 5000 or '
++                '0, or leave the box empty — the client was NOT saved.',
++                'danger',
++            )
++            return redirect(url_for('clients'))
+     opening_balance_date = _resolve_opening_balance_date(request.form.get('opening_balance_date'))
+     page_entries_raw = request.form.getlist('page_entry')
+     page_entries_clean = [str(x).strip() for x in page_entries_raw if str(x).strip()]
+diff -ruN a/app/blueprints/reports/cash.py b/app/blueprints/reports/cash.py
+--- a/app/blueprints/reports/cash.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/blueprints/reports/cash.py	2026-11-18 13:48:10.000000000 +0000
+@@ -494,8 +494,8 @@
+                 entry, reason=request.form.get('void_reason'), actor=current_user,
+             )
+             db.session.commit()
+-            audit_log(current_user, 'cash_flow.entry.delete', f'id={entry_id}')
+-            flash('Transaction deleted. The financial effect was reversed immediately.', 'success')
++            audit_log(current_user, 'cash_flow.entry.void', f'id={entry_id}')
++            flash('Transaction voided — the document is kept and the financial effect was reversed immediately.', 'success')
+         except ValueError as exc:
+             db.session.rollback()
+             flash(str(exc), 'danger')
+diff -ruN a/app/blueprints/sales/_direct_sales_add_direct_sale.py b/app/blueprints/sales/_direct_sales_add_direct_sale.py
+--- a/app/blueprints/sales/_direct_sales_add_direct_sale.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/blueprints/sales/_direct_sales_add_direct_sale.py	2026-11-18 13:45:56.000000000 +0000
+@@ -632,7 +632,7 @@
+         if shortfall > 0:
+             flash(
+                 f'Cash sale saved with Rs. {shortfall:,.2f} left unpaid — '
+-                'collect it from the client ledger.',
++                'the buyer is registered on the client ledger, where it can be collected.',
+                 'warning',
+             )
+     
+diff -ruN a/app/blueprints/sales/_direct_sales_edit_direct_sale.py b/app/blueprints/sales/_direct_sales_edit_direct_sale.py
+--- a/app/blueprints/sales/_direct_sales_edit_direct_sale.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/blueprints/sales/_direct_sales_edit_direct_sale.py	2026-11-18 13:45:48.000000000 +0000
+@@ -429,7 +429,7 @@
+             shortfall = round((amount - discount) - paid_amount, 2)
+             flash(
+                 f'Cash sale saved with Rs. {shortfall:,.2f} shown as unpaid '
+-                'instead of rejecting it — collect it from the client ledger.',
++                'instead of rejecting it — it is registered on the client ledger so it can be collected.',
+                 'warning',
+             )
+ 
+diff -ruN a/app/blueprints/system/logs.py b/app/blueprints/system/logs.py
+--- a/app/blueprints/system/logs.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/blueprints/system/logs.py	2026-11-18 13:45:21.000000000 +0000
+@@ -66,8 +66,16 @@
+ 
+ 
+ def _guard():
+-    """Logs are an admin/settings-permission area, same rule as before."""
+-    if current_user.role in ('admin', 'root'):
++    """Logs are an admin/settings-permission area, same rule as before.
++
++    Authentication comes FIRST.  Reading ``current_user.role`` before the
++    login check raised ``AttributeError: 'AnonymousUserMixin' object has no
++    attribute 'role'`` for any anonymous visitor and returned a 500 page
++    instead of the login redirect every other protected screen gives.
++    """
++    if not getattr(current_user, 'is_authenticated', False):
++        return redirect(url_for('login', next=request.path))
++    if getattr(current_user, 'role', None) in ('admin', 'root'):
+         return None
+     from app.services.permissions import _user_can
+     if _user_can('can_access_settings'):
+@@ -127,6 +135,7 @@
+ 
+ @bp.route('/logs')
+ @bp.route('/logs/')
++@login_required
+ def logs_index():
+     guard = _guard()
+     if guard:
+diff -ruN a/app/hooks.py b/app/hooks.py
+--- a/app/hooks.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/hooks.py	2026-11-18 13:49:34.000000000 +0000
+@@ -42,6 +42,81 @@
+     return raw
+ 
+ 
++#: Modules a permission-only account can be pointed at, in the order the
++#: no-access page offers them.  (permission, label, endpoint)
++_ACCESS_LINKS = (
++    ('can_view_dashboard', 'Dashboard', 'index'),
++    ('can_manage_sales', 'Sales & Billing', 'direct_sales'),
++    ('can_manage_bookings', 'Bookings', 'bookings'),
++    ('can_manage_clients', 'Clients', 'clients'),
++    ('can_manage_suppliers', 'Suppliers', 'suppliers'),
++    ('can_manage_purchases', 'Purchases (GRN)', 'grn'),
++    ('can_view_stock', 'Stock', 'inventory.stock_summary'),
++    ('can_manage_pending_bills', 'Unpaid Bills', 'unpaid_transactions_page'),
++    ('can_manage_returns', 'Material Returns', 'material_returns_page'),
++    ('can_view_reports', 'Reports', 'profit_reports'),
++    ('can_view_accounts', 'Accounts', 'accounts.index'),
++    ('can_access_settings', 'Settings', 'settings'),
++)
++
++
++def _no_access_response(needed):
++    """Terminal "this account has no access yet" page (breaks the redirect loop).
++
++    A user whose permissions have not been granted yet used to bounce between
++    ``/`` and ``/`` for ever.  This page says what is missing and links the
++    modules the account *can* open, so the owner can either tick a permission or
++    sign out — and the browser can never loop.
++    """
++    from flask import render_template_string, url_for as _url_for
++    from flask_login import current_user
++    from app.services.permissions import _user_can
++
++    links = []
++    for permission, label, endpoint in _ACCESS_LINKS:
++        try:
++            if not _user_can(permission):
++                continue
++            links.append({'label': label, 'url': _url_for(endpoint)})
++        except Exception:
++            continue
++
++    return render_template_string(
++        """
++        <!doctype html><html lang="en"><head><meta charset="utf-8">
++        <title>No access yet</title>
++        <style>
++          body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f6f7fb;
++               color:#1f2933;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center}
++          .card{background:#fff;border:1px solid #e3e6ef;border-radius:14px;max-width:640px;
++                padding:32px 36px;box-shadow:0 10px 30px rgba(15,23,42,.06)}
++          h1{font-size:22px;margin:0 0 8px}
++          p{margin:0 0 12px;line-height:1.55;color:#475467}
++          code{background:#f1f3f9;padding:2px 6px;border-radius:6px;font-size:13px}
++          .links{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 6px}
++          .links a{background:#1f4e78;color:#fff;text-decoration:none;padding:9px 14px;border-radius:9px;font-size:14px}
++          .out{display:inline-block;margin-top:18px;color:#b42318;text-decoration:none;font-weight:600}
++        </style></head><body><div class="card">
++        <h1>This account has no access yet</h1>
++        <p>You are signed in as <strong>{{ user }}</strong>, but the permission this page needs
++        (<code>{{ needed }}</code>) has not been granted. Nothing is broken and no data was changed.</p>
++        {% if links %}
++        <p>You can still open:</p>
++        <div class="links">{% for l in links %}<a href="{{ l.url }}">{{ l.label }}</a>{% endfor %}</div>
++        {% else %}
++        <p>Ask the administrator (admin &rarr; Settings &rarr; Users &amp; permissions) to tick the boxes
++        for this account. Until then every screen is closed.</p>
++        {% endif %}
++        <a class="out" href="{{ logout_url }}">Sign out</a>
++        </div></body></html>
++        """,
++        user=getattr(current_user, 'username', '') or 'this account',
++        needed=needed if isinstance(needed, str) else ', '.join(sorted(needed)),
++        links=links,
++        logout_url=_url_for('logout'),
++    ), 403
++
++
+ def register_hooks(app):
+     from flask import jsonify, flash, redirect, url_for, session
+     from flask_login import current_user
+@@ -352,6 +427,13 @@
+             allowed = _user_can(needed)
+         if allowed:
+             return None
++        # The dashboard itself is permission-gated, so redirecting a user who
++        # lacks ``can_view_dashboard`` to ``index`` sent them straight back to
++        # the guard that had just refused them: 302 -> / -> 302 for ever
++        # (ERR_TOO_MANY_REDIRECTS) on every freshly created account, because
++        # /add_user stores every can_* flag as 0.  Show a terminal page instead.
++        if endpoint.rsplit('.', 1)[-1] in ('index', 'dashboard', 'home'):
++            return _no_access_response(needed)
+         flash('Permission denied for this module.', 'danger')
+         return redirect(url_for('index'))
+ 
+diff -ruN a/app/services/cash_flow_svc.py b/app/services/cash_flow_svc.py
+--- a/app/services/cash_flow_svc.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/services/cash_flow_svc.py	2026-11-18 13:48:07.000000000 +0000
+@@ -1345,34 +1345,54 @@
+ 
+ 
+ def void_manual_cash_flow_entry(entry, reason=None, actor=None):
+-    """Delete a manual cash-flow entry for real: reverse money, drop both rows."""
++    """Void a manual cash-flow entry: reverse the money, keep the document.
++
++    The route that calls this is a *void*, and every other module in the system
++    keeps the document and flags it.  This one used to delete the entry and its
++    ledger row, which raised ``FOREIGN KEY constraint failed`` (the entry still
++    pointed at the transaction) and then ``NOT NULL constraint failed:
++    cash_flow_entry_audit.entry_id`` (the audit trail is not nullable, so
++    deleting the parent tried to blank it).  The operator only ever saw
++    "The operation could not be completed due to a data error", so a wrong
++    expense had no reversal path at all.
++
++    Now: the account movement is reversed, the entry is flagged ``is_void`` with
++    who/when/why, and the whole audit trail stays readable.
++    """
+     from app.services.accounting import _void_account_tx
+ 
+     if entry is None:
+         raise ValueError('Entry not found.')
+     if entry.is_void:
+-        raise ValueError('This transaction is already deleted.')
++        raise ValueError('This transaction is already voided.')
+     before = _cf_snapshot(entry)
+     tx = db.session.get(AccountTransaction, entry.account_tx_id) if entry.account_tx_id else None
+     if tx:
+         for account_id in {tx.from_account_id, tx.to_account_id}:
+-            _cf_assert_open_period(account_id, tx.date_posted, operation='deleted')
++            _cf_assert_open_period(account_id, tx.date_posted, operation='voided')
++    actor_name = _cf_actor_name(actor)
+     if tx and not tx.is_void:
+         _void_account_tx(tx)
+-    entry_id = entry.id
+-    _cf_write_audit(entry, 'Deleted', before=before, after={'deleted': True, 'id': entry_id}, reason=reason, actor=actor)
+     if tx:
+-        tx.voided_by = _cf_actor_name(actor)
++        tx.voided_by = actor_name
+         tx.voided_at = pk_now()
+-        db.session.delete(tx)
+-    from app.services.health import note_db_shrink
+-    note_db_shrink(2 if tx else 1)
+-    db.session.delete(entry)
++        tx.void_reason = (reason or '').strip()[:300] or None
++    entry.is_void = True
++    entry.voided_at = pk_now()
++    entry.voided_by = actor_name
++    entry.void_reason = (reason or '').strip()[:300] or None
++    entry.updated_by = actor_name
++    entry.updated_at = pk_now()
++    entry.revision = int(entry.revision or 1) + 1
++    _cf_write_audit(
++        entry, 'Voided', before=before,
++        after={'voided': True, 'id': entry.id, 'account_tx_id': entry.account_tx_id},
++        reason=reason, actor=actor,
++    )
+     db.session.flush()
+     return entry
+ 
+ 
+-
+ def _cf_row(
+     *, sort_dt, direction, amount, reference, description, note='',
+     category='', subcategory='', party_name='', party_type='',
+diff -ruN a/app/services/grn_costing.py b/app/services/grn_costing.py
+--- a/app/services/grn_costing.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/services/grn_costing.py	2026-11-18 13:44:57.000000000 +0000
+@@ -30,11 +30,11 @@
+ import logging
+ from decimal import Decimal, ROUND_HALF_UP
+ 
+-from sqlalchemy import func
++from sqlalchemy import func, or_
+ 
+ from models import (
+     db, GRN, GRNItem, GRNCharge, SupplierPayment, AccountTransaction,
+-    CashFlowParty,
++    CashFlowParty, Supplier,
+ )
+ from utils.money import to_minor, from_minor, decimal_money
+ from app.services.pricing import allocate_cents
+@@ -184,6 +184,12 @@
+ # per GRN.  Keyed by the SQLAlchemy engine so the cache lives exactly as long as
+ # the database it was read from, and cleared on commit/rollback/DDL.
+ _LEGACY_GRN_PAYMENTS = {}
++# Supplier-level vouchers (``/add_supplier_payment``, grn_id IS NULL) are money
++# the shop really paid this supplier.  They are allocated to that supplier's
++# open GRN obligations oldest-first so the Pay-GRN screen stops offering a bill
++# that has already been paid.  Keyed by ``(engine id, supplier id)`` and cleared
++# with every other GRN line cache (see ``invalidate_line_cache``).
++_SUPPLIER_LEVEL_ALLOC = {}
+ 
+ 
+ def _primed_store():
+@@ -223,6 +229,7 @@
+     _PRIMED_PAYMENTS.clear()
+     _PRIMED_CASH_PAID.clear()
+     _LEGACY_GRN_PAYMENTS.clear()
++    _SUPPLIER_LEVEL_ALLOC.clear()
+ 
+ 
+ def _install_line_cache_invalidation():
+@@ -722,6 +729,94 @@
+     return f'{prefix}:{grn_id}' if grn_id is not None else prefix
+ 
+ 
++def _direct_material_paid_minor(grn):
++    """Money that reached this GRN's material obligation from a GRN-linked voucher."""
++    total = 0
++    for p in (_payment_rows(grn) if getattr(grn, 'id', None) else []):
++        if not _is_supplier_payment(p):
++            continue
++        if getattr(p, 'grn_charge_id', None) is not None:
++            continue
++        amount = int(getattr(p, 'amount_minor', None)
++                     if getattr(p, 'amount_minor', None) is not None
++                     else _minor(getattr(p, 'amount', 0)))
++        if amount <= 0:
++            continue
++        kind = (getattr(p, 'payment_kind', None) or '').strip().upper()
++        if kind in ('GRN_MATERIAL', '', 'LEGACY_GRN_AUTO', 'ADVANCE'):
++            total += amount
++    return total
++
++
++def supplier_level_applied_minor():
++    """``{grn_id: minor}`` of supplier-level vouchers applied to open material bills.
++
++    ``/add_supplier_payment`` records a voucher against the *supplier*, not a
++    GRN.  The supplier ledger counts it immediately, but the GRN screens used
++    to ignore it, so the Pay-GRN page kept offering the full bill and the same
++    money could be paid twice (the supplier then showed a credit they never
++    earned).
++
++    Every unapplied supplier-level voucher is now allocated oldest-bill-first
++    over that supplier's open material obligation, capped so a bill is never
++    "paid" beyond its own amount.  Vouchers that carry an ``[auto_grn_pay:<id>]``
++    marker are skipped: those are already attached to their GRN by
++    :func:`_payment_rows`, and counting them here would settle them twice.
++    """
++    key = _legacy_grn_payments_cache_key()
++    if key is not None and key in _SUPPLIER_LEVEL_ALLOC:
++        return _SUPPLIER_LEVEL_ALLOC[key]
++
++    rows = SupplierPayment.query.filter(
++        SupplierPayment.grn_id.is_(None),
++        SupplierPayment.is_void == False,  # noqa: E712
++        or_(
++            SupplierPayment.recipient_type.is_(None),
++            SupplierPayment.recipient_type.in_(('', 'SUPPLIER')),
++        ),
++        ~func.lower(func.coalesce(SupplierPayment.note, '')).like('%[auto_grn_pay:%'),
++    ).order_by(SupplierPayment.date_posted.asc(), SupplierPayment.id.asc()).all()
++
++    pools = {}
++    for p in rows:
++        if (getattr(p, 'payment_kind', None) or '').strip().upper() == 'GRN_CHARGE':
++            continue
++        amount = int(getattr(p, 'amount_minor', None)
++                     if getattr(p, 'amount_minor', None) is not None
++                     else _minor(getattr(p, 'amount', 0)))
++        if amount > 0 and getattr(p, 'supplier_id', None):
++            pools[int(p.supplier_id)] = pools.get(int(p.supplier_id), 0) + amount
++
++    applied = {}
++    for supplier_id, pool in pools.items():
++        supplier = db.session.get(Supplier, supplier_id)
++        if supplier is None:
++            continue
++        name_norm = (supplier.name or '').strip().lower()
++        grns = GRN.query.filter(
++            GRN.is_void == False,  # noqa: E712
++            GRN.is_cancelled == False,  # noqa: E712
++            or_(
++                GRN.supplier_id == supplier_id,
++                func.lower(func.trim(func.coalesce(GRN.supplier, ''))) == name_norm,
++            ),
++        ).order_by(GRN.date_posted.asc(), GRN.id.asc()).all()
++        for grn in grns:
++            if pool <= 0:
++                break
++            open_minor = max(0, supplier_material_minor(grn) - _direct_material_paid_minor(grn))
++            if open_minor <= 0:
++                continue
++            take = min(pool, open_minor)
++            applied[int(grn.id)] = applied.get(int(grn.id), 0) + take
++            pool -= take
++
++    if key is not None:
++        _SUPPLIER_LEVEL_ALLOC.clear()
++        _SUPPLIER_LEVEL_ALLOC[key] = applied
++    return applied
++
++
+ def supplier_obligation_paid_minor(grn, obligation_kind):
+     """How much of ONE supplier obligation has actually been paid.
+ 
+@@ -758,8 +853,11 @@
+             lumped += amount
+     supplier_minor = supplier_material_minor(grn)
+     billed_minor = supplier_billed_charge_minor(grn)
++    # Money paid through the supplier-level form, allocated to this bill.
++    applied_here = supplier_level_applied_minor().get(int(grn.id), 0) \
++        if getattr(grn, 'id', None) else 0
+     if obligation_kind == OBLIGATION_MATERIAL:
+-        return min(material_paid, supplier_minor)
++        return min(material_paid + applied_here, supplier_minor)
+     if obligation_kind == OBLIGATION_EXPENSES:
+         # Older lumped vouchers paid the material part first.  The per-expense
+         # allocation then spreads that money over the ticked expenses, so an
+@@ -768,7 +866,8 @@
+         applied = sum(row['supplier_paid_minor'] for row in allocation.values())
+         return min(applied, billed_minor)
+     # The legacy lumped obligation (and any "whole supplier bill" query).
+-    return min(material_paid + lumped + expense_paid, supplier_minor + billed_minor)
++    return min(material_paid + applied_here + lumped + expense_paid,
++               supplier_minor + billed_minor)
+ 
+ 
+ def _charge_minor(charge):
+@@ -1592,6 +1691,7 @@
+     'supplier_billed_charge_minor', 'supplier_ledger_credit_minor', 'grn_breakdown',
+     'charge_recipient_paid_minor', 'charge_recipient_open_minor', 'expense_route_allocation',
+     'parse_obligation_key', 'make_obligation_key', 'supplier_obligation_paid_minor',
++    'supplier_level_applied_minor',
+     'supplier_bill_breakdown', 'grn_expense_payment_rows',
+     'payment_obligation_label', 'OBLIGATION_SUPPLIER', 'OBLIGATION_MATERIAL',
+     'OBLIGATION_EXPENSES', 'OBLIGATION_CHARGE', 'PAYMENT_KIND_BY_OBLIGATION',
+diff -ruN a/app/services/lookups.py b/app/services/lookups.py
+--- a/app/services/lookups.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/services/lookups.py	2026-11-18 13:45:41.000000000 +0000
+@@ -107,6 +107,57 @@
+     return None
+ 
+ 
++def ensure_client_master_for_name(name, *, category='General'):
++    """Return the client master row for a free-text name, creating one if needed.
++
++    A counter sale may be typed with a walk-in name that is not in the client
++    list.  When such a sale is not paid in full the shop is owed money, and a
++    receivable with no client master belongs to nobody: no ledger can show it,
++    Current Payables counts zero, and the operator cannot chase it.  The sale is
++    the authority for the name, so the master row is created (or an existing one
++    with that exact name is reused) at the moment the shortfall is recorded.
++    """
++    from models import Client
++
++    clean = (name or '').strip()
++    if not clean:
++        return None
++    existing = get_client_by_input(clean)
++    if existing is not None:
++        if getattr(existing, 'is_active', True) is False:
++            existing.is_active = True
++        return existing
++
++    digits = ''.join(ch for ch in clean.upper() if ch.isalnum())[:10] or 'WALKIN'
++    code = f"WC-{digits}"
++    suffix = 1
++    while Client.query.filter(func.lower(func.trim(Client.code)) == code.lower()).first() is not None:
++        suffix += 1
++        code = f"WC-{digits}-{suffix}"
++    # Use the client-ledger categories the database actually has; fall back to
++    # the caller's label when the table is empty.
++    category_name = category or 'General'
++    try:
++        from models import ClientCategory
++        wanted = (category or '').strip().lower()
++        rows = ClientCategory.query.all()
++        match = next((c.name for c in rows if (c.name or '').strip().lower() == wanted), None)
++        if match:
++            category_name = match
++        elif wanted != 'general':
++            match = next((c.name for c in rows if (c.name or '').strip().lower() == 'general'), None)
++            if match:
++                category_name = match
++    except Exception:
++        pass
++    client = Client(name=clean, code=code, category=category_name or 'General',
++                    is_active=True, phone='', address='', opening_balance=0)
++    db.session.add(client)
++    db.session.flush()
++    logging.getLogger(__name__).info('WALK_IN_CLIENT_CREATED name=%s code=%s', clean, code)
++    return client
++
++
+ MATERIAL_NOT_SELECTED_MSG = (
+     'Material not selected. Please select an existing material from the Material Master.'
+ )
+diff -ruN a/app/services/profit_loss.py b/app/services/profit_loss.py
+--- a/app/services/profit_loss.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/services/profit_loss.py	2026-11-18 13:52:31.000000000 +0000
+@@ -1246,9 +1246,24 @@
+                 # same quantities at the very same per-lot rates.  This also
+                 # makes a later/addendum GRN update both views in real time.
+                 if fifo_layers:
+-                    cost += sum(_f(layer["qty"]) * _f(layer["rate"]) for layer in fifo_layers)
+-                    estimated = True
+-                    bases.append("Reconstructed global FIFO estimate from dated GRN lots and all material issues; each lot keeps its own rate")
++                    reconstructed = sum(_f(layer["qty"]) * _f(layer["rate"]) for layer in fifo_layers)
++                    cost += reconstructed
++                    # The lots are real dated GRN lots, each at its own rate, so
++                    # this is a recorded cost unless it disagrees with the cost
++                    # the sale line actually froze.  Labelling a delivered batch
++                    # "estimated" when it is costed from the very lots the GRN
++                    # page consumes (and matching the frozen rate to the paisa)
++                    # understated "recorded-cost-only profit" and told the owner
++                    # half his cost of goods was a guess.
++                    frozen_matches_lots = (
++                        frozen > 0
++                        and abs(residual * frozen - reconstructed) <= max(0.005, abs(reconstructed) * 1e-9)
++                    )
++                    if frozen_matches_lots:
++                        bases.append("Dated GRN lots at the cost frozen on the sale line")
++                    else:
++                        estimated = True
++                        bases.append("Reconstructed global FIFO estimate from dated GRN lots and all material issues; each lot keeps its own rate")
+                     add_layer_sources(fifo_layers)
+                 still_uncovered = uncovered
+                 if still_uncovered > EPS:
+diff -ruN a/app/services/profit_loss_exports.py b/app/services/profit_loss_exports.py
+--- a/app/services/profit_loss_exports.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/services/profit_loss_exports.py	2026-11-18 13:46:05.000000000 +0000
+@@ -110,6 +110,12 @@
+         ("Other Recognized Losses", "total_other_losses"),
+         ("Other Recognized Gains", "total_other_gains"),
+         ("Unresolved Revenue Excluded From Net", "unresolved_revenue"),
++        # The revenue the net-profit line is actually computed from.  Without
++        # this row the workbook quoted "Earned Material Revenue (net of
++        # returns)" 35,800 next to a net profit computed from 39,000, and a
++        # reader starting from the revenue line could not reproduce the profit.
++        # Recognized + Unresolved = Earned Material Revenue (+ delivery/other).
++        ("Revenue Used In Net Profit (recognized)", "recognized_revenue"),
+         ("Net Profit / Loss", "total_profit"),
+         ("Recorded-Cost-Only Profit / Loss", "recorded_cost_profit"),
+         ("Net Margin %", "margin_pct"),
+diff -ruN a/app/services/schema.py b/app/services/schema.py
+--- a/app/services/schema.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/services/schema.py	2026-11-18 13:45:06.000000000 +0000
+@@ -173,6 +173,36 @@
+         db.session.rollback()
+ 
+ 
++def _ensure_document_archive_columns():
++    """Additive columns that keep cancelled/voided documents readable.
++
++    * ``booking_item.cancelled_qty`` — a cancellation used to delete the line,
++      so the ordered material, quantity and rate were lost.  The line now stays
++      and the cancelled quantity is recorded here.
++    * ``material_return.voided_with_sale`` — when a bill is voided its returns
++      are reversed with it; this marks the ones reversed *because of the sale*
++      so restoring the bill restores exactly those.
++
++    Idempotent (PRAGMA check first), so it is safe on every boot.
++    """
++    tables = {
++        'booking_item': [('cancelled_qty', 'REAL DEFAULT 0')],
++        'material_return': [('voided_with_sale', 'BOOLEAN DEFAULT 0')],
++    }
++    try:
++        for table, cols in tables.items():
++            rows = db.session.execute(text(f"PRAGMA table_info('{table}')")).fetchall()
++            existing = {r[1] for r in rows}
++            if not existing:
++                continue
++            for col, col_type in cols:
++                if col not in existing:
++                    db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
++        db.session.commit()
++    except Exception:
++        db.session.rollback()
++
++
+ def _ensure_line_discount_columns():
+     """Per-line discount storage (see ``app.services.pricing``).
+ 
+@@ -1311,6 +1341,10 @@
+     except Exception:
+         pass
+     try:
++        _ensure_document_archive_columns()
++    except Exception:
++        pass
++    try:
+         _backfill_line_discounts()
+     except Exception:
+         pass
+diff -ruN a/app/services/void_rebuild.py b/app/services/void_rebuild.py
+--- a/app/services/void_rebuild.py	2026-11-18 13:42:16.000000000 +0000
++++ b/app/services/void_rebuild.py	2026-11-18 13:45:43.000000000 +0000
+@@ -1276,6 +1276,7 @@
+     bill_refs = _direct_sale_bill_refs(sale)
+     old_client_code, old_client_name = _direct_sale_client_identity(sale)
+     entry_ids_to_void = _track_entry_ids_for_sale(sale.id)
++    _cascade_sale_returns(sale, True)
+     
+     try:
+         # Mark DirectSale as void
+@@ -1423,6 +1424,36 @@
+         e.is_void = False
+ 
+ 
++def _cascade_sale_returns(sale, voided):
++    """Void (or restore) the material returns that belong to a sale.
++
++    A return has already put the goods back on the shelf and credited the
++    client.  Voiding the bill on its own restored the full delivered quantity a
++    second time: 200 kg delivered, 20 kg returned, bill voided -> 520 kg on hand
++    against a physical 500, plus a credit for goods the shop already has.  A
++    return therefore follows the sale it came from; only the ones reversed by
++    this cascade are marked, so a return voided by the operator stays void.
++    """
++    if sale is None or getattr(sale, 'id', None) is None:
++        return 0
++    returns = MaterialReturn.query.filter(MaterialReturn.source_sale_id == sale.id).all()
++    changed = 0
++    for ret in returns:
++        if voided:
++            if ret.is_void:
++                continue
++            _set_material_return_void_state(ret, True)
++            ret.voided_with_sale = True
++            changed += 1
++        else:
++            if not ret.is_void or not getattr(ret, 'voided_with_sale', False):
++                continue
++            _set_material_return_void_state(ret, False)
++            ret.voided_with_sale = False
++            changed += 1
++    return changed
++
++
+ def _set_direct_sale_void_state(sale, is_void):
+     if not sale:
+         return False
+@@ -1430,6 +1461,9 @@
+     if sale.is_void == target:
+         return False
+ 
++    # Reverse (or restore) this bill's returns first: stock and the client
++    # credit have to move with the document they belong to.
++    _cascade_sale_returns(sale, target)
+     old_refs = _direct_sale_bill_refs(sale)
+     old_client_code, old_client_name = _direct_sale_client_identity(sale)
+     sale.is_void = target
+@@ -1647,6 +1681,16 @@
+         client_code = OPEN_KHATA_CODE
+         if not client_name:
+             client_name = OPEN_KHATA_NAME
++    elif client_obj is None and pending_amount > 0 and (sale.client_name or '').strip():
++        # A part-paid counter sale to a name that is not in the client list
++        # leaves money owed by a party no ledger knows about: /current_payables
++        # counted zero clients for a 3,000 open bill, so the shop could never
++        # chase it.  Register the walk-in so the receivable has an owner.
++        from app.services.lookups import ensure_client_master_for_name
++        client_obj = ensure_client_master_for_name(sale.client_name)
++        if client_obj is not None:
++            client_code = client_obj.code
++            client_name = client_obj.name
+ 
+     refs = set(_direct_sale_bill_refs(sale))
+     bill_ref = _direct_sale_default_bill_ref(sale)
+diff -ruN a/blueprints/accounts/transactions.py b/blueprints/accounts/transactions.py
+--- a/blueprints/accounts/transactions.py	2026-11-18 13:42:16.000000000 +0000
++++ b/blueprints/accounts/transactions.py	2026-11-18 13:53:45.000000000 +0000
+@@ -130,7 +130,7 @@
+             )
+         _audit_pending_account_transactions()
+         db.session.commit()
+-        flash('Account entry deleted. The money effect was reversed immediately; audit history is in the audit log.', 'success')
++        flash('Account entry voided — the money effect was reversed immediately and the voucher is kept, marked void, with its audit history.', 'success')
+     except ValueError as exc:
+         db.session.rollback()
+         flash(str(exc), 'danger')
+diff -ruN a/blueprints/inventory/stock.py b/blueprints/inventory/stock.py
+--- a/blueprints/inventory/stock.py	2026-11-18 13:42:16.000000000 +0000
++++ b/blueprints/inventory/stock.py	2026-11-18 13:46:10.000000000 +0000
+@@ -138,6 +138,10 @@
+             'out': day_out,
+             'closing': closing_val,
+             'unit_cost': float(cinfo.get('unit_cost') or 0.0),
++            # Value of what is physically on hand at the same FIFO cost the
++            # Profit & Loss uses.  Nothing on any screen used to state what the
++            # stock was worth; the shop could not read its own inventory value.
++            'stock_value': round(closing_val * float(cinfo.get('unit_cost') or 0.0), 2),
+             'adj_net': float(ainfo['net']) if ainfo else 0.0,
+             'adj_refs': ainfo['refs'] if ainfo else [],
+         })
+@@ -191,6 +195,7 @@
+     grand_received = float(sum(r['received'] for r in totals_by_material))
+     grand_delivered = float(sum(r['delivered'] for r in totals_by_material))
+     grand_net = grand_received - grand_delivered
++    grand_stock_value = round(sum(row['stock_value'] for row in stats), 2)
+ 
+     # GRN incoming-history: every stock-IN movement in the range that traces
+     # back to an active GRN (authoritative ledger — entry rows are created by
+@@ -223,6 +228,7 @@
+         grand_received=grand_received,
+         grand_delivered=grand_delivered,
+         grand_net=grand_net,
++        grand_stock_value=grand_stock_value,
+         all_reasons=ALL_REASONS,
+         adjustments_today=adj_rows_today,
+     )
+diff -ruN a/models/sales.py b/models/sales.py
+--- a/models/sales.py	2026-11-18 13:42:16.000000000 +0000
++++ b/models/sales.py	2026-11-18 13:45:02.000000000 +0000
+@@ -64,6 +64,11 @@
+     # delivered booking can never recognise more discount than it delivered.
+     discount = db.Column(db.Float, default=0)
+     discount_reason = db.Column(db.String(200))
++    # Quantity cancelled off this line.  ``qty`` falls to the undelivered
++    # remainder so every money/receivable figure stays exact, while this column
++    # keeps what was ordered (material, rate and ordered quantity) readable on
++    # the document after a cancellation instead of deleting the line.
++    cancelled_qty = db.Column(db.Float, default=0)
+ 
+     @property
+     def gross_amount(self):
+@@ -319,6 +324,10 @@
+     source_sale_id = db.Column(db.Integer, nullable=True, index=True)
+     source_bill_no = db.Column(db.String(50), nullable=True, index=True)
+     is_void = db.Column(db.Boolean, default=False, index=True)
++    # True when this credit was reversed because the sale it belongs to was
++    # voided.  Restoring the sale restores exactly these returns and never a
++    # return the operator voided on its own.
++    voided_with_sale = db.Column(db.Boolean, default=False, index=True)
+     items = db.relationship('MaterialReturnItem', backref='material_return', lazy=True, cascade='all, delete-orphan')
+ 
+     payment = db.relationship('Payment')
+diff -ruN a/templates/index.html b/templates/index.html
+--- a/templates/index.html	2026-11-18 13:42:16.000000000 +0000
++++ b/templates/index.html	2026-11-18 13:46:14.000000000 +0000
+@@ -67,11 +67,12 @@
+     {% endif %}
+     {{ ui_tile(
+         href='/current_payables',
+-        label='Total Outstanding',
++        label='Net Client Dues',
+         value='Rs. ' ~ "{:,.0f}".format(total_outstanding),
+         icon='bi-exclamation-circle',
+         colour='red',
+-        sub='Real dues across open bills (undelivered bookings shown separately above)',
++        sub='Client balances owed after advances and credits' ~
++            (' — open bills total Rs. ' ~ "{:,.0f}".format(open_bill_total) if open_bill_total else ''),
+         cta='Review unpaid bills'
+     ) }}
+     {% if current_user.can_manage_payments or current_user.role == 'admin' %}
+diff -ruN a/templates/stock_summary.html b/templates/stock_summary.html
+--- a/templates/stock_summary.html	2026-11-18 13:42:16.000000000 +0000
++++ b/templates/stock_summary.html	2026-11-18 13:46:10.000000000 +0000
+@@ -246,6 +246,7 @@
+                 <th class="num">Stock In</th>
+                 <th class="num">Stock Out</th>
+                 <th class="num">Closing</th>
++                <th class="num">Value at Cost</th>
+                 <th class="num" style="min-width: 120px;">Physical Count</th>
+                 <th class="num">Diff</th>
+                 <th class="num">Est. P&amp;L Impact</th>
+@@ -271,6 +272,9 @@
+                 <td class="num pos">+{{ "{:g}".format(s.in) }}</td>
+                 <td class="num">-{{ "{:g}".format(s.out) }}</td>
+                 <td class="num warn fw-bold">{{ "{:g}".format(s.closing) }}</td>
++                <td class="num">{{ "{:,.2f}".format(s.stock_value) }}
++                  {% if s.unit_cost %}<div class="small text-muted">{{ "{:,.2f}".format(s.unit_cost) }} / {{ s.unit }}</div>{% endif %}
++                </td>
+                 <td class="num">
+                   <input type="number" step="any" min="0" name="physical_qty"
+                          class="form-control form-control-sm text-center fw-bold physical-count-input"
+@@ -283,9 +287,19 @@
+                 <td class="num small" id="impact-{{ loop.index }}">--</td>
+               </tr>
+               {% else %}
+-              <tr><td class="ui-empty" colspan="9">No snapshot data found.</td></tr>
++              <tr><td class="ui-empty" colspan="10">No snapshot data found.</td></tr>
+               {% endfor %}
+             </tbody>
++            {% if stats %}
++            <tfoot>
++              <tr>
++                <td class="fw-bold">Total stock value on hand</td>
++                <td colspan="6" class="text-muted small">Closing quantity &times; FIFO cost per unit (the same cost the Profit &amp; Loss uses)</td>
++                <td class="num fw-bold">{{ "{:,.2f}".format(grand_stock_value) }}</td>
++                <td colspan="2"></td>
++              </tr>
++            </tfoot>
++            {% endif %}
+           </table>
+         </div>
+       </div>

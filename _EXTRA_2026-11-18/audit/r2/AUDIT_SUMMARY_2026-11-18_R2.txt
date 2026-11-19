@@ -1,0 +1,77 @@
+AUDIT SUMMARY — AMS v5.2, ROUND 2 (2026-11-18)
+==============================================
+
+WHAT WAS AUDITED
+  Current code: /home/user/AMSV5-2_FIXED (byte-identical copy in AUDIT_2026-11-18/r2/app_under_test,
+  314 .py files hashed). Fresh isolated database created by the app itself: 86 tables, 618 URL rules.
+  Production database untouched: md5 124f7a31809e32061d370f7c93e2d7d4, 0 sales, 1 client, read-only.
+  AUDIT ONLY — no source file, DB row or configuration was changed. No SQL INSERT/UPDATE/DELETE anywhere.
+
+METHOD
+  * complete route inventory (618 rules: 325 GET / 330 mutating / 39 danger-named), every GET fetched:
+    313 swept, 272 rendered, 35 x 404 (missing entity), 0 errors
+  * 86 scripted tests through the app's own forms and routes, in a deterministic replay
+    (tools/run_chain.sh s1_masters ... s10_regressions)
+  * every headline figure rebuilt independently in SQL and compared with the screen
+  * B-01 ... B-09 re-derived from scratch
+
+RESULT
+  86 tests — 73 PASS, 13 FAIL
+  14 findings — 6 HIGH, 5 MEDIUM, 1 LOW, 2 INFO, 0 CRITICAL
+  Round-1 regression claims: eight hold, B-08 passes on a clean run, B-09 is dragged down by F-R2-03.
+
+STRONG POINTS (verified, not assumed)
+  Gross sales 39,500 / discounts 500 / net revenue 39,000 / COGS 25,468.75 / net profit 10,031.25 —
+  every one rebuilt from the tables and exact to the paisa.
+  Cash: opening 650,000 + in 79,500 - out 109,500 = 620,000 = sum of the three account balances.
+  Stock: 12mm 1,150, 20mm 520, cement 0 — each equals its own IN minus OUT history.
+  Receivables, payables (supplier 100,000 + third-party 7,000 = 107,000), supplier ledger, client ledger,
+  daily breakdown and dashboard undelivered tile all agree.
+  Landed cost freezes on each delivery line; a returned kg reverses exactly 611.25 of cost.
+  CSRF, injection, XSS, anonymous access and role separation hold (except the two items below).
+
+OPEN HIGH FINDINGS (all new in this round)
+  F-R2-01  Supplier payments taken through the ordinary Pay Supplier form are not allocated to GRN
+           obligations, so the Pay GRN screen keeps offering the whole bill. Paying it drove the supplier
+           balance to -60,000 in the test: the same 60,000 was paid twice.
+  F-R2-02  Voiding a sale that already had a material return double counts it: 520 kg on hand instead of
+           the physical 500, and a 3,200 client credit that is never reversed.
+  F-R2-03  An expense voucher cannot be voided: FOREIGN KEY constraint failed, and the operator only sees
+           "The operation could not be completed due to a data error".
+  F-R2-04  GET /logs raises AttributeError for an anonymous visitor instead of redirecting to /login.
+  F-R2-05  A user created with default (all-zero) permissions loops 302 -> / -> 302 for ever.
+  F-R2-06  An under-collected counter sale to a free-text walk-in name leaves a receivable owned by no
+           client: Current Payables shows 0 clients / Rs. 0.00 while 17,500 of bills is open.
+
+MEDIUM
+  F-R2-07  Booking cancel rewrites the total to 0.00 and deletes the item lines.
+  F-R2-08  A non-numeric opening balance is stored as 0 with a success flash.
+  F-R2-09  The P&L workbook quotes revenue (35,800) its own net profit (based on 39,000) is not computed from.
+  F-R2-10  No screen reports the value of stock on hand (149,875 of landed inventory is invisible).
+  F-R2-11  Dashboard "Total Outstanding — real dues across open bills" reads 0.00 with 17,500 open.
+
+LOW / INFO
+  F-R2-12  Frozen delivery cost labelled "Estimated Material Cost".
+  F-R2-13  PDF exports need the optional requirements-pdf.txt (missing in the shipped environment).
+  F-R2-14  Booking cancel is client-wide LIFO, not per booking (documented on screen).
+
+NOT TESTED / BLOCKED
+  Integrity-audit fault injection (would need SQL writes), the 39 destructive routes (by design),
+  legacy migration, delivery-rent/driver settlement, notifications/backup scheduler/multi-tenant,
+  concurrency, full database import round trip.
+
+VERDICT
+  CONDITIONAL — not release-ready for unattended production use.
+  The double-entry core is sound and the round-1 fixes held. Fix F-R2-01, F-R2-02 and F-R2-03, then
+  F-R2-06/F-R2-11, and re-run this suite before going live with real money.
+
+STATUS: the 14 findings were fixed in the follow-up round — see ../r3/VERIFICATION_2026-11-18_R3.md
+(86/86 PASS on the patched build with this same suite).
+
+ARTEFACTS (all in AUDIT_2026-11-18/r2/)
+  MASTER_ERP_AUDIT_2026-11-18_R2.md           12-part report
+  BUG_REGISTER_2026-11-18_R2.csv              14 findings, 11 fields each
+  TEST_RESULTS_2026-11-18_R2.csv              86 tests with expected / actual / verdict
+  FINANCIAL_RECONCILIATION_2026-11-18_R2.csv  14 reconciliation rows
+  ROUTE_INVENTORY_2026-11-18_R2.csv           618 routes
+  evidence/  results.json, routes_sweep.json, routes_all.csv, source_hashes.txt

@@ -1,0 +1,549 @@
+{# Shared "Daily Cash & Bank Reconciliation" board (reference layout #1).
+   Context: dict `dr` with keys:
+     day_str, prev_str, next_str, positions, day_lock,
+     total_expected, total_counted, net_difference, embed (bool)
+   When dr.embed is true the board is rendered inside the Cash Flow page
+   (reconcile tab): navigation stays on /cash_flow (param `recon_day`) and
+   POST actions round-trip through /daily_reconciliation with a return_to. #}
+<style>
+  .dr-wrap { background:#eef2f7; padding:20px 16px; {% if not dr.embed %}min-height:100vh;{% else %}border-radius:14px;{% endif %} }
+  .dr-card { background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; }
+  .dr-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .dr-kpi { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px 18px; }
+  .dr-kpi .lbl { font-size:11px; letter-spacing:.6px; text-transform:uppercase; color:#64748b; font-weight:600; }
+  .dr-kpi .val { font-size:22px; font-weight:700; margin-top:4px; }
+  .dr-table { min-width:1120px; }
+  .dr-table th { font-size:11px; letter-spacing:.5px; text-transform:uppercase; color:#334155; background:#eef2f7; border-bottom:2px solid #dbe3ee; padding:10px 12px; white-space:nowrap; }
+  .dr-table td { padding:10px 12px; border-bottom:1px solid #e6ecf4; vertical-align:middle; font-size:13px; white-space:nowrap; }
+  .dr-table-wrap, .dr-scroll-top { overflow-x:auto; scrollbar-width:thin; }
+  .dr-scroll-top { height:14px; margin-bottom:6px; }
+  .dr-scroll-top-inner { height:1px; min-width:1120px; }
+  .dr-table-wrap { border-radius:10px; }
+  .dr-sticky-account { position:sticky; left:0; z-index:2; background:#f8fafc; box-shadow:8px 0 12px -12px rgba(15,23,42,.45); }
+  th.dr-sticky-account { z-index:3; background:#eef2f7; }
+  .dr-account-title { font-weight:800; color:#0f172a; max-width:220px; overflow:hidden; text-overflow:ellipsis; }
+  .dr-account-chip { display:inline-flex; align-items:center; border-radius:999px; padding:2px 7px; font-size:10px; font-weight:800; letter-spacing:.4px; background:#e0f2fe; color:#0369a1; margin-left:6px; }
+  .dr-count-form { min-width:172px; }
+  .dr-count-input { width:124px; text-align:right; }
+  .dr-count-input[readonly] { background:#eef2ff; }
+  .dr-save-state { min-width:84px; max-width:190px; font-size:11px; white-space:normal; line-height:1.2; }
+  .dr-counted { background:#eef2ff; color:#4f46e5; font-weight:700; }
+  .in-pos { color:#16a34a; } .out-neg { color:#dc2626; }
+  .tin-pos { color:#2563eb; } .tout-neg { color:#6366f1; }
+  .dr-open { color:#64748b; }
+  .dr-badge-recon { color:#16a34a; font-weight:700; }
+  .dr-badge-diff { color:#dc2626; font-weight:700; }
+  .dr-status-open { background:#ecfdf5; border:1px solid #a7f3d0; border-radius:12px; }
+  .dr-status-locked { background:#eef2ff; border:1px solid #c7d2fe; border-radius:12px; }
+  .dr-editform { display:none; }
+  .dr-editform.show { display:table-row; }
+</style>
+
+{% set dr_post_action = url_for('daily_reconciliation') %}
+{% if dr.embed %}
+  {% set dr_return_to = url_for('cash_flow', recon_day=dr.day_str, _anchor='tab-reconcile') %}
+{% endif %}
+
+<div class="dr-wrap">
+
+  <!-- HEADER -->
+  <div class="dr-card p-3 mb-3 d-flex flex-wrap align-items-center justify-content-between">
+    <div>
+      <div class="d-flex align-items-center">
+        <i class="bi bi-check-circle text-success fs-5 me-2"></i>
+        <span class="fw-bold" style="font-size:17px;">Daily Cash &amp; Bank Reconciliation</span>
+      </div>
+      <div class="text-muted small ms-4">Verify actual counted cash/bank balances against ledger expected closing.</div>
+    </div>
+    <form method="GET" {% if dr.embed %}action="{{ url_for('cash_flow') }}#tab-reconcile"{% endif %} class="d-flex align-items-center gap-2">
+      <div class="dr-card px-2 py-1 d-flex align-items-center gap-2" style="border-radius:8px;">
+        <i class="bi bi-calendar3 text-primary"></i>
+        <span class="dr-mono small fw-bold">Select Date:</span>
+        <input type="date" name="{% if dr.embed %}recon_day{% else %}day{% endif %}" value="{{ dr.day_str }}" class="form-control form-control-sm dr-mono" style="width:150px;" onchange="this.form.submit()">
+      </div>
+      {% if dr.embed %}
+      <a href="{{ url_for('cash_flow', recon_day=dr.prev_str, _anchor='tab-reconcile') }}" class="btn btn-sm btn-light border" title="Previous day"><i class="bi bi-chevron-left"></i></a>
+      <a href="{{ url_for('cash_flow', recon_day=dr.next_str, _anchor='tab-reconcile') }}" class="btn btn-sm btn-light border" title="Next day"><i class="bi bi-chevron-right"></i></a>
+      <a href="{{ url_for('cash_flow', recon_day=dr.day_str, _anchor='tab-reconcile') }}" class="btn btn-sm btn-light border" title="Refresh"><i class="bi bi-arrow-clockwise"></i></a>
+      {% else %}
+      <a href="{{ url_for('daily_reconciliation', day=dr.prev_str) }}" class="btn btn-sm btn-light border" title="Previous day"><i class="bi bi-chevron-left"></i></a>
+      <a href="{{ url_for('daily_reconciliation', day=dr.next_str) }}" class="btn btn-sm btn-light border" title="Next day"><i class="bi bi-chevron-right"></i></a>
+      <a href="{{ url_for('daily_reconciliation', day=dr.day_str) }}" class="btn btn-sm btn-light border" title="Refresh"><i class="bi bi-arrow-clockwise"></i></a>
+      {% endif %}
+    </form>
+  </div>
+
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div class="small text-muted">
+      Saving a counted balance immediately posts any difference between the counted account and its counter account so Accounts reflects your count;
+      finalising the day freezes these totals for tomorrow. Differences never touch sales or profit.
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      {% if dr.day_lock %}
+      <span class="btn btn-sm btn-outline-secondary disabled" title="Unlock the day to correct its differences">
+        <i class="bi bi-lock me-1"></i>Differences fixed at finalisation
+      </span>
+      {% else %}
+      <form method="POST" action="{{ dr_post_action }}">
+        <input type="hidden" name="action" value="refresh_differences">
+        <input type="hidden" name="day" value="{{ dr.day_str }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        {% if dr.embed %}<input type="hidden" name="return_to" value="{{ dr_return_to }}">{% endif %}
+        <button class="btn btn-sm btn-outline-secondary" title="Check saved counts against current transactions, including older days">Update Differences for This Day</button>
+      </form>
+      {% endif %}
+      <a class="btn btn-sm btn-primary fw-bold" href="{{ url_for('daily_reconciliation_differences') }}"><i class="bi bi-journal-text me-1"></i> Differences Report</a>
+    </div>
+  </div>
+
+  <!-- STATUS BANNER -->
+  {% if dr.day_lock %}
+  <div class="dr-status-locked p-3 mb-3 d-flex align-items-center justify-content-between">
+    <div class="d-flex align-items-center">
+      <div class="me-3" style="width:44px;height:44px;border-radius:10px;background:#c7d2fe;display:flex;align-items:center;justify-content:center;">
+        <i class="bi bi-lock-fill text-primary fs-5"></i>
+      </div>
+      <div>
+        <div class="fw-bold text-primary" style="letter-spacing:.4px;">FINANCIAL DAY STATUS: LOCKED / CLOSED</div>
+        <div class="small text-secondary">Final day close by {{ dr.day_lock.locked_by or '—' }} on {{ dr.day_lock.locked_at.strftime('%Y-%m-%d %H:%M') if dr.day_lock.locked_at else '—' }}. Locked counted totals are carried to the next day's opening. {{ dr.shift_closes|length }} shift close checkpoint{{ '' if dr.shift_closes|length == 1 else 's' }} retained below.</div>
+      </div>
+    </div>
+    <form method="POST" action="{{ dr_post_action }}" onsubmit="return confirm('Unlock day {{ dr.day_str }}? You can edit or clear counts and add transactions for this day; saved count postings remain synced with Accounts until edited or cleared.');">
+      <input type="hidden" name="day" value="{{ dr.day_str }}">
+      {% if dr.embed %}<input type="hidden" name="return_to" value="{{ dr_return_to }}">{% endif %}
+      <button class="btn btn-outline-primary fw-bold" name="action" value="unlock"><i class="bi bi-unlock me-1"></i> Unlock Day</button>
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    </form>
+  </div>
+  {% else %}
+  <div class="dr-status-open p-3 mb-3 d-flex align-items-center justify-content-between">
+    <div class="d-flex align-items-center">
+      <div class="me-3" style="width:44px;height:44px;border-radius:10px;background:#a7f3d0;display:flex;align-items:center;justify-content:center;">
+        <i class="bi bi-unlock text-success fs-5"></i>
+      </div>
+      <div>
+        <div class="fw-bold text-success" style="letter-spacing:.4px;">FINANCIAL DAY STATUS: OPEN FOR RECONCILIATION</div>
+        <div class="small text-secondary">Record one or more shift closes as staff hand over; finalize the day only after the last shift. {{ dr.shift_closes|length }} shift close checkpoint{{ '' if dr.shift_closes|length == 1 else 's' }} recorded.</div>
+      </div>
+    </div>
+    <form method="POST" action="{{ dr_post_action }}" onsubmit="return confirm('Finalize and lock day {{ dr.day_str }}? This is the final daily close. Any remaining unposted differences are posted to the counter accounts ({{ dr.counter_less.name if dr.counter_less else 'Counter Less Account' }} / {{ dr.counter_excess.name if dr.counter_excess else 'Counter Excess Account' }}), and the counted totals become the next day opening balances.');">
+      <input type="hidden" name="day" value="{{ dr.day_str }}">
+      {% if dr.embed %}<input type="hidden" name="return_to" value="{{ dr_return_to }}">{% endif %}
+      <input type="text" name="note" class="form-control form-control-sm me-2" style="max-width:260px;"
+             maxlength="300" placeholder="Reason for any difference"
+             title="Stored on the posting and on every ledger row it creates">
+      <button class="btn btn-success fw-bold px-3" name="action" value="lock"><i class="bi bi-file-earmark-check me-1"></i> Finalize &amp; Lock Day</button>
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    </form>
+  </div>
+  {% endif %}
+
+  <!-- SHIFT CLOSE CHECKPOINTS: immutable snapshots; day lock is the final close -->
+  <div class="dr-card p-3 mb-3" style="border-color:#bfdbfe;background:#f8fbff;">
+    <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
+      <div>
+        <div class="fw-bold text-primary"><i class="bi bi-arrow-left-right me-1"></i> SHIFT CLOSE &amp; HANDOVER</div>
+        <div class="small text-muted mt-1">Before each handover, update the counted balance for every account, then save a named shift snapshot. Each shift's expected close uses ledger movements since the prior handover (or day opening). The day stays open for the next shift; finalize it only after the last shift.</div>
+      </div>
+      <form method="POST" action="{{ dr_post_action }}" class="d-flex flex-wrap align-items-end gap-2" {% if dr.day_lock %}aria-disabled="true"{% endif %}>
+        <input type="hidden" name="action" value="close_shift">
+        <input type="hidden" name="day" value="{{ dr.day_str }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        {% if dr.embed %}<input type="hidden" name="return_to" value="{{ dr_return_to }}">{% endif %}
+        <div><label class="form-label small fw-semibold mb-1" for="drShiftName">Shift name</label>
+          <input id="drShiftName" name="shift_name" class="form-control form-control-sm" maxlength="80" placeholder="Morning / Evening" required {% if dr.day_lock %}disabled{% endif %}>
+        </div>
+        <div><label class="form-label small fw-semibold mb-1" for="drShiftNote">Handover note (optional)</label>
+          <input id="drShiftNote" name="shift_note" class="form-control form-control-sm" maxlength="500" placeholder="Short / excess / handover details" style="min-width:220px;" {% if dr.day_lock %}disabled{% endif %}>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm fw-bold" {% if dr.day_lock or not dr.positions %}disabled{% endif %} onclick="return confirm('Record this shift close? Every active account must have a counted balance. The record is permanent; the day remains open.');"><i class="bi bi-check2-square me-1"></i> Record Shift Close</button>
+      </form>
+    </div>
+    {% if dr.shift_closes %}
+    <div class="table-responsive mt-3">
+      <table class="table table-sm align-middle mb-0">
+        <thead><tr><th>Shift</th><th>Closed by</th><th>Closed at</th><th class="text-end">Expected</th><th class="text-end">Counted</th><th class="text-end">Difference</th><th>Handover note</th><th>Snapshot</th></tr></thead>
+        <tbody>
+          {% for close in dr.shift_closes %}
+          <tr>
+            <td class="fw-bold">{{ close.shift_name }}</td>
+            <td>{{ close.closed_by or '—' }}</td>
+            <td class="text-nowrap">{{ close.closed_at.strftime('%Y-%m-%d %H:%M') if close.closed_at else '—' }}</td>
+            <td class="text-end dr-mono">Rs. {{ "{:,.2f}".format(close.total_expected or 0) }}</td>
+            <td class="text-end dr-mono">Rs. {{ "{:,.2f}".format(close.total_counted or 0) }}</td>
+            <td class="text-end dr-mono fw-bold {% if close.difference == 0 %}text-success{% else %}text-danger{% endif %}">Rs. {{ "{:,.2f}".format(close.difference or 0) }}</td>
+            <td>{{ close.note or '—' }}</td>
+            <td><details><summary class="small text-primary" style="cursor:pointer;">Account details</summary>
+              <div class="table-responsive mt-2"><table class="table table-sm mb-0"><thead><tr><th>Account</th><th class="text-end">Shift opening</th><th class="text-end">In</th><th class="text-end">Out</th><th class="text-end">Expected at handover</th><th class="text-end">Counted</th><th class="text-end">Difference</th></tr></thead><tbody>
+                {% for p in close.positions %}<tr><td>{{ p.account_name }}</td><td class="text-end dr-mono">Rs. {{ "{:,.2f}".format(p.opening or 0) }}</td><td class="text-end dr-mono">Rs. {{ "{:,.2f}".format(p.amount_in or 0) }}</td><td class="text-end dr-mono">Rs. {{ "{:,.2f}".format(p.amount_out or 0) }}</td><td class="text-end dr-mono">Rs. {{ "{:,.2f}".format(p.expected_closing or 0) }}</td><td class="text-end dr-mono">Rs. {{ "{:,.2f}".format(p.counted or 0) }}</td><td class="text-end dr-mono">Rs. {{ "{:,.2f}".format(p.difference or 0) }}</td></tr>{% endfor %}
+              </tbody></table></div>
+            </details></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<div class="small text-muted mt-3">No shift close checkpoints recorded for this day.</div>{% endif %}
+  </div>
+
+  <!-- KPI TILES -->
+  <div class="row g-3 mb-3">
+    <div class="col-md-4"><div class="dr-kpi">
+      <div class="lbl">Total Expected Ledger Balance</div>
+      <div class="val dr-mono text-dark" data-dr-total="expected">Rs. {{ "{:,.0f}".format(dr.total_expected) }}</div>
+      <div class="small text-muted mt-1">All {{ dr.accounts_total }} company money account{{ '' if dr.accounts_total == 1 else 's' }}</div>
+    </div></div>
+    <div class="col-md-4"><div class="dr-kpi">
+      <div class="lbl">Total Actual Counted Balance</div>
+      <div class="val dr-mono" style="color:#4f46e5;" data-dr-total="counted">{% if dr.total_counted is not none %}Rs. {{ "{:,.0f}".format(dr.total_counted) }}{% else %}-{% endif %}</div>
+      <div class="small text-muted mt-1" data-dr-counted-summary>{{ dr.counted_accounts }} of {{ dr.accounts_total }} account{{ '' if dr.accounts_total == 1 else 's' }} counted</div>
+    </div></div>
+    <div class="col-md-4"><div class="dr-kpi">
+      <div class="lbl">Net Difference</div>
+      <div class="val dr-mono {% if dr.net_difference is none %}text-muted{% elif dr.net_difference == 0 %}text-success{% else %}text-danger{% endif %}" data-dr-total="difference">{% if dr.net_difference is none %}-{% else %}Rs. {{ "{:,.0f}".format(dr.net_difference) }}{% endif %}</div>
+      <div class="small text-muted mt-1">Counted vs expected closing of the counted account{{ '' if dr.counted_accounts == 1 else 's' }}</div>
+    </div></div>
+  </div>
+
+  <!-- COUNTER ACCOUNT POSTINGS: where the difference went -->
+  <div class="dr-card p-3">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+      <div class="d-flex align-items-center">
+        <i class="bi bi-arrow-left-right text-primary me-2"></i>
+        <span class="fw-bold" style="letter-spacing:.4px;">COUNTED DIFFERENCES FOR {{ dr.day_str }}</span>
+      </div>
+      <div class="small text-secondary">
+        A shortage is sent <em>to</em> the counter, an excess is received <em>from</em> it —
+        the running pair is always visible, never hidden in a report.
+      </div>
+    </div>
+    <div class="row g-2 mt-1">
+      <div class="col-md-4">
+        <div class="dr-kpi">
+          <div class="lbl">Counted less (shortage)</div>
+          <div class="val dr-mono text-danger" data-dr-counter="less">Rs. {{ "{:,.0f}".format(-(dr.posting.less_total or 0)) }}</div>
+          <div class="small text-muted mt-1">sent to <span data-dr-counter-name="less">{{ dr.counter_less.name if dr.counter_less else 'Counter Less Account' }}</span></div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="dr-kpi">
+          <div class="lbl">Counted more (excess)</div>
+          <div class="val dr-mono text-primary" data-dr-counter="excess">Rs. {{ "{:,.0f}".format(dr.posting.excess_total or 0) }}</div>
+          <div class="small text-muted mt-1">received from <span data-dr-counter-name="excess">{{ dr.counter_excess.name if dr.counter_excess else 'Counter Excess Account' }}</span></div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="dr-kpi">
+          <div class="lbl">Counter accounts hold now</div>
+          <div class="val dr-mono {% if dr.counter_total == 0 %}text-success{% else %}text-danger{% endif %}" data-dr-counter="total">Rs. {{ "{:,.0f}".format(dr.counter_total or 0) }}</div>
+          <div class="small text-muted mt-1">
+            <span data-dr-counter="summary">{{ dr.posting.count }} difference{{ '' if dr.posting.count == 1 else 's' }} on this day{% if dr.posting.open_count %} ({{ dr.posting.open_count }} still unexplained){% endif %}</span> ·
+            <a href="{{ url_for('daily_reconciliation_differences') }}">differences report</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACCOUNT POSITIONS -->
+  <div class="dr-card p-3">
+    <div class="d-flex align-items-center mb-3">
+      <i class="bi bi-bank text-primary me-2"></i>
+      <span class="fw-bold" style="letter-spacing:.4px;">ACCOUNT POSITIONS FOR {{ dr.day_str }}</span>
+    </div>
+    <div class="dr-scroll-top" data-dr-scroll-top><div class="dr-scroll-top-inner"></div></div>
+    <div class="dr-table-wrap" data-dr-table-wrap>
+      <table class="table dr-table align-middle mb-0">
+        <thead>
+          <tr>
+            <th class="dr-sticky-account">Account</th><th class="text-end">Opening</th><th class="text-end">In</th>
+            <th class="text-end">Out</th><th class="text-end">Transfer In</th><th class="text-end">Transfer Out</th>
+            <th class="text-end">Expected Closing</th><th class="text-end">Actual Counted</th>
+            <th class="text-end">Difference</th><th class="text-center">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in dr.positions %}
+          <tr data-dr-row="{{ p.account_id }}">
+            <td class="dr-sticky-account">
+              <div class="d-flex align-items-center">
+                <span class="dr-account-title" title="{{ p.account_name }}">{{ p.account_name }}</span>
+                {% if p.category_label %}<span class="dr-account-chip">{{ p.category_label }}</span>{% endif %}
+              </div>
+            </td>
+            <td class="text-end dr-mono dr-open" data-dr-field="opening">Rs. {{ "{:,.0f}".format(p.opening) }}</td>
+            <td class="text-end dr-mono in-pos" data-dr-field="in">+ Rs. {{ "{:,.0f}".format(p['in']) }}</td>
+            <td class="text-end dr-mono out-neg" data-dr-field="out">- Rs. {{ "{:,.0f}".format(p.out) }}</td>
+            <td class="text-end dr-mono tin-pos" data-dr-field="transfer_in">+ Rs. {{ "{:,.0f}".format(p.transfer_in) }}</td>
+            <td class="text-end dr-mono tout-neg" data-dr-field="transfer_out">- Rs. {{ "{:,.0f}".format(p.transfer_out) }}</td>
+            <td class="text-end dr-mono fw-bold text-dark" data-dr-field="expected_closing">Rs. {{ "{:,.0f}".format(p.expected_closing) }}</td>
+            <td class="text-end dr-mono dr-counted">
+              <form method="POST" action="{{ dr_post_action }}" class="dr-count-form d-inline-flex align-items-center justify-content-end gap-1" data-dr-count-form>
+                <input type="hidden" name="action" value="save_count">
+                <input type="hidden" name="day" value="{{ dr.day_str }}">
+                <input type="hidden" name="account_id" value="{{ p.account_id }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                {% if dr.embed %}<input type="hidden" name="return_to" value="{{ dr_return_to }}">{% endif %}
+                <input type="text" inputmode="decimal" autocomplete="off" name="counted" class="form-control form-control-sm dr-mono dr-count-input"
+                       value="{{ "{:,.2f}".format(p.counted).rstrip('0').rstrip('.') if p.counted is not none else '' }}"
+                       placeholder="{{ "{:,.0f}".format(p.expected_closing) }}" aria-label="Actual counted balance for {{ p.account_name }}"
+                       {% if p.is_locked %}readonly title="Day is locked — unlock it to change the count"{% else %}title="Type the physical balance (commas are fine)"{% endif %}>
+                <button type="submit" class="btn btn-sm btn-success fw-bold" name="action" value="save_count"
+                        {% if p.is_locked %}disabled title="Day is locked — unlock it to change the count"{% else %}title="Save counted balance"{% endif %}><i class="bi bi-save"></i></button>
+              </form>
+            </td>
+            <td class="text-end dr-mono" data-dr-field="difference">
+              {% if p.effective_counted is not none %}
+                {% set shown_diff = p.posted_difference if p.posted_difference is not none else p.difference %}
+                {% if shown_diff == 0 %}<span class="dr-badge-recon">0 (RECONCILED)</span>
+                {% else %}<span class="dr-badge-diff">{{ "{:,.0f}".format(shown_diff) }}</span>{% endif %}
+                {% if p.posting and p.posting.status == 'posted' and p.posting.difference %}
+                  <div class="small mt-1 text-primary fw-semibold" title="Posted to {{ p.posting.counter_name }}">
+                    <i class="bi bi-arrow-left-right me-1"></i>
+                    {{ 'sent to ' if p.posting.difference < 0 else 'received from ' }}{{ p.posting.counter_name }}
+                    · ATX-{{ p.posting.posted_out_tx_id }}
+                  </div>
+                {% elif p.posting and p.posting.status == 'resolved' %}
+                  <div class="small mt-1 text-muted" title="Resolved by {{ p.posting.resolved_by or 'unknown' }}">
+                    <i class="bi bi-check2-circle me-1"></i>Resolved by {{ p.posting.resolved_by or 'unknown' }}
+                  </div>
+                {% elif p.posting and p.posting.status == 'reversed' and shown_diff != 0 %}
+                  <div class="small mt-1 text-muted"><i class="bi bi-arrow-counterclockwise me-1"></i>Posting reversed</div>
+                {% endif %}
+              {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td class="text-center">
+              <div class="d-flex align-items-center justify-content-center gap-1">
+                <span class="dr-save-state text-muted" data-dr-save-state></span>
+                {% if not p.is_locked %}
+                <form method="POST" action="{{ dr_post_action }}" class="d-inline" data-dr-clear-form>
+                  <input type="hidden" name="action" value="clear_count">
+                  <input type="hidden" name="day" value="{{ dr.day_str }}">
+                  <input type="hidden" name="account_id" value="{{ p.account_id }}">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                  {% if dr.embed %}<input type="hidden" name="return_to" value="{{ dr_return_to }}">{% endif %}
+                  <button type="submit" class="btn btn-sm btn-outline-danger" name="action" value="clear_count" title="Clear counted value"><i class="bi bi-x"></i></button>
+                </form>
+                {% endif %}
+                {% if p.is_locked %}<span class="badge bg-primary"><i class="bi bi-lock-fill me-1"></i>Locked</span>{% endif %}
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="10" class="text-center text-muted py-4">No company accounts found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+<script>
+(function(){
+  const wrap = document.querySelector('[data-dr-table-wrap]');
+  const top = document.querySelector('[data-dr-scroll-top]');
+  if (wrap && top) {
+    let syncing = false;
+    top.addEventListener('scroll', function(){ if (!syncing) { syncing = true; wrap.scrollLeft = top.scrollLeft; syncing = false; } });
+    wrap.addEventListener('scroll', function(){ if (!syncing) { syncing = true; top.scrollLeft = wrap.scrollLeft; syncing = false; } });
+  }
+
+  const money0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+  const moneyInput = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
+  function rs(value){ return 'Rs. ' + money0.format(Number(value || 0)); }
+  function fmtInput(value){
+    if (value === null || value === undefined || value === '') return '';
+    return moneyInput.format(Number(value));
+  }
+  function signedRs(prefix, value){ return prefix + ' ' + rs(value); }
+  function setTotal(name, value){
+    const el = document.querySelector('[data-dr-total="' + name + '"]');
+    if (!el) return;
+    el.textContent = value === null || value === undefined ? '-' : rs(value);
+    if (name === 'difference') {
+      const none = value === null || value === undefined;
+      el.classList.toggle('text-muted', none);
+      el.classList.toggle('text-danger', !none && Number(value) !== 0);
+      el.classList.toggle('text-success', !none && Number(value) === 0);
+    }
+  }
+  function renderDiffCell(cell, p){
+    cell.textContent = '';
+    if (p.effective_counted === null || p.effective_counted === undefined) {
+      const dash = document.createElement('span');
+      dash.className = 'text-muted';
+      dash.textContent = '—';
+      cell.appendChild(dash);
+      return;
+    }
+    const d = Number((p.posted_difference !== null && p.posted_difference !== undefined) ? p.posted_difference : (p.difference || 0));
+    const badge = document.createElement('span');
+    if (d === 0) {
+      badge.className = 'dr-badge-recon';
+      badge.textContent = '0 (RECONCILED)';
+    } else {
+      badge.className = 'dr-badge-diff';
+      badge.textContent = money0.format(d);
+    }
+    cell.appendChild(badge);
+    const posting = p.posting;
+    if (posting && posting.status === 'posted' && posting.difference) {
+      const info = document.createElement('div');
+      info.className = 'small mt-1 text-primary fw-semibold';
+      info.title = 'Posted to ' + (posting.counter_name || '');
+      const icon = document.createElement('i');
+      icon.className = 'bi bi-arrow-left-right me-1';
+      info.appendChild(icon);
+      const prefix = Number(posting.difference) < 0 ? 'sent to ' : 'received from ';
+      info.appendChild(document.createTextNode(prefix + (posting.counter_name || '') + ' · ATX-' + (posting.posted_out_tx_id || '')));
+      cell.appendChild(info);
+    } else if (posting && posting.status === 'resolved') {
+      const info = document.createElement('div');
+      info.className = 'small mt-1 text-muted';
+      const icon = document.createElement('i');
+      icon.className = 'bi bi-check2-circle me-1';
+      info.appendChild(icon);
+      info.appendChild(document.createTextNode('Resolved by ' + (posting.resolved_by || 'unknown')));
+      cell.appendChild(info);
+    } else if (posting && posting.status === 'reversed' && d !== 0) {
+      const info = document.createElement('div');
+      info.className = 'small mt-1 text-muted';
+      const icon = document.createElement('i');
+      icon.className = 'bi bi-arrow-counterclockwise me-1';
+      info.appendChild(icon);
+      info.appendChild(document.createTextNode('Posting reversed'));
+      cell.appendChild(info);
+    }
+  }
+  function updateBoard(payload){
+    if (!payload || !Array.isArray(payload.positions)) return;
+    setTotal('expected', payload.total_expected);
+    setTotal('counted', payload.total_counted);
+    setTotal('difference', payload.net_difference);
+    const summary = document.querySelector('[data-dr-counted-summary]');
+    if (summary && payload.accounts_total !== undefined) {
+      const n = payload.counted_accounts || 0;
+      const t = payload.accounts_total || 0;
+      summary.textContent = n + ' of ' + t + ' account' + (t === 1 ? '' : 's') + ' counted';
+    }
+    if (payload.posting) {
+      const lessEl = document.querySelector('[data-dr-counter="less"]');
+      const excessEl = document.querySelector('[data-dr-counter="excess"]');
+      const totalEl = document.querySelector('[data-dr-counter="total"]');
+      const cSumEl = document.querySelector('[data-dr-counter="summary"]');
+      if (lessEl) lessEl.textContent = rs(-(payload.posting.less_total || 0));
+      if (excessEl) excessEl.textContent = rs(payload.posting.excess_total || 0);
+      if (totalEl) {
+        const ct = Number(payload.counter_total || 0);
+        totalEl.textContent = rs(ct);
+        totalEl.classList.toggle('text-success', ct === 0);
+        totalEl.classList.toggle('text-danger', ct !== 0);
+      }
+      if (cSumEl) {
+        const cnt = payload.posting.count || 0;
+        const openCnt = payload.posting.open_count || 0;
+        cSumEl.textContent = cnt + ' difference' + (cnt === 1 ? '' : 's') + ' on this day' + (openCnt ? (' (' + openCnt + ' still unexplained)') : '');
+      }
+    }
+    if (payload.counter_less_name) {
+      const ln = document.querySelector('[data-dr-counter-name="less"]');
+      if (ln) ln.textContent = payload.counter_less_name;
+    }
+    if (payload.counter_excess_name) {
+      const en = document.querySelector('[data-dr-counter-name="excess"]');
+      if (en) en.textContent = payload.counter_excess_name;
+    }
+    payload.positions.forEach(function(p){
+      const row = document.querySelector('[data-dr-row="' + p.account_id + '"]');
+      if (!row) return;
+      const map = {
+        opening: rs(p.opening),
+        in: signedRs('+', p['in']),
+        out: signedRs('-', p.out),
+        transfer_in: signedRs('+', p.transfer_in),
+        transfer_out: signedRs('-', p.transfer_out),
+        expected_closing: rs(p.expected_closing)
+      };
+      Object.keys(map).forEach(function(k){ const el = row.querySelector('[data-dr-field="' + k + '"]'); if (el) el.textContent = map[k]; });
+      const diff = row.querySelector('[data-dr-field="difference"]');
+      if (diff) renderDiffCell(diff, p);
+      const input = row.querySelector('input[name="counted"]');
+      if (input) {
+        input.placeholder = money0.format(Number(p.expected_closing || 0));
+        // Never reformat the field the user is typing in.
+        if (document.activeElement !== input) input.value = fmtInput(p.counted);
+        input.readOnly = !!p.is_locked;
+      }
+      const saveBtn = row.querySelector('button[value="save_count"]');
+      if (saveBtn) saveBtn.disabled = !!p.is_locked;
+    });
+  }
+  function showSaveState(state, text, cls, title){
+    if (!state) return;
+    state.textContent = text;
+    state.className = 'dr-save-state ' + (cls || 'text-muted');
+    state.title = title || text || '';
+  }
+  async function postForm(form, ev){
+    const row = form.closest('[data-dr-row]');
+    const state = row ? row.querySelector('[data-dr-save-state]') : null;
+    showSaveState(state, 'Saving…', 'text-muted');
+    // FormData omits the clicked button. Prefer SubmitEvent.submitter; never
+    // use document.activeElement (Enter / unfocused Save left action blank
+    // and the row showed a red "Error"). Hidden action=save_count/clear_count
+    // is the fallback so a count is still saved.
+    const submitter = (ev && ev.submitter) || form.querySelector('button[type="submit"][name="action"]');
+    const fd = new FormData(form);
+    if (submitter && submitter.name) fd.set(submitter.name, submitter.value);
+    if (!fd.get('action')) {
+      fd.set('action', form.hasAttribute('data-dr-clear-form') ? 'clear_count' : 'save_count');
+    }
+    try {
+      // The form has controls named "action", which shadow form.action in
+      // browsers. Read the HTML attribute so fetch reaches the actual route.
+      const res = await fetch(form.getAttribute('action'), {
+        method:'POST',
+        body:fd,
+        credentials:'same-origin',
+        headers:{ 'X-Requested-With':'XMLHttpRequest', 'Accept':'application/json' }
+      });
+      let payload = null;
+      const ctype = (res.headers.get('content-type') || '').toLowerCase();
+      if (ctype.includes('application/json')) {
+        try { payload = await res.json(); } catch (e) { payload = null; }
+      }
+      if (payload && Array.isArray(payload.positions)) updateBoard(payload);
+      let errMsg = (payload && (payload.error || payload.message)) || '';
+      if (!errMsg) {
+        if (res.redirected || (res.ok && !payload)) errMsg = 'Session expired. Reload the page and log in.';
+        else errMsg = 'Save failed (HTTP ' + res.status + ')';
+      }
+      if (res.ok && payload && payload.ok) {
+        showSaveState(state, 'Saved', 'text-success');
+        window.setTimeout(function(){ if (state && state.textContent === 'Saved') state.textContent = ''; }, 1200);
+      } else {
+        const csrfExpired = /csrf|token|session expired|log in/i.test(errMsg);
+        // Show the reason the server gave (locked day, invalid amount, …)
+        // instead of a bare "Error" the user cannot act on.
+        const label = csrfExpired
+          ? 'Reload page & retry'
+          : (errMsg && errMsg.length <= 34 ? errMsg : 'Not saved');
+        showSaveState(state, label, 'text-danger', errMsg);
+        if (state) state.classList.add('fw-semibold');
+        throw new Error(errMsg);
+      }
+    } catch (err) {
+      if (state && !state.textContent) showSaveState(state, 'Error', 'text-danger', err.message || '');
+      else if (state && !state.title) state.title = err.message || '';
+      console.error(err);
+    }
+  }
+  document.querySelectorAll('[data-dr-count-form], [data-dr-clear-form]').forEach(function(form){
+    form.addEventListener('submit', function(ev){
+      if (!window.fetch || !window.FormData) return;
+      ev.preventDefault();
+      postForm(form, ev);
+    });
+  });
+})();
+</script>

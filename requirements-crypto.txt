@@ -1,0 +1,4 @@
+# Optional: authenticated encryption for emailed/downloaded backups
+# (AMS_BACKUP_ENCRYPTION_ENABLED=1, AUDIT-111).  Pure wheel, but kept as an
+# extra so core installs stay stdlib-only.
+cryptography>=42,<51

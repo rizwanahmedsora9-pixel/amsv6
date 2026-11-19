@@ -1,0 +1,12 @@
+# Small core dependency set for the Flask + SQLite app.
+# Keep optional scientific/data and native PDF stacks in their own files so
+# installs can succeed on ARM/Android environments without wheels for them.
+Flask>=3.0,<4.0
+Flask-Login>=0.6,<1.0
+Flask-SQLAlchemy>=3.1,<4.0
+Werkzeug>=3.0,<4.0
+SQLAlchemy>=2.0,<3.0
+openpyxl>=3.1,<4.0
+
+# QR codes on Urdu receipts (also needed for browser print).
+segno>=1.5,<2.0

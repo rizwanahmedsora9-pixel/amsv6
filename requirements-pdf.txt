@@ -1,0 +1,21 @@
+# Optional PDF export dependencies. ReportLab is the app's fallback PDF renderer
+# and includes a native extension; WeasyPrint is the HTML-to-PDF engine and needs
+# OS packages (Pango, Cairo, GDK-PixBuf).
+-r requirements.txt
+reportlab>=4.0,<5.0
+flask-weasyprint>=0.6,<1.0
+# Urdu text shaping for the ReportLab PDF paths (dual-language English+Urdu PDFs).
+# uharfbuzz applies the Jameel Noori font's own OpenType GSUB rules (arabic-reshaper/
+# python-bidi remain as a fallback when uharfbuzz has no wheel for the host).
+uharfbuzz>=0.30
+arabic-reshaper>=3.0
+python-bidi>=0.4
+# fontTools builds the PUA-mapped copy of the Jameel Noori face that ReportLab
+# needs (glyph-id -> U+F0000+gid).  Without it the Urdu runs are drawn as
+# glyph ids the unmodified cmap does not contain and silently disappear from
+# the PDF, which is why it is a hard requirement of the Urdu sheet.
+fonttools>=4.40
+# The Urdu sheet prints a QR of the bill on every copy.  segno is pure Python,
+# so it installs everywhere ReportLab does; without it the QR block is left
+# blank and the rest of the sheet is unaffected.
+segno>=1.5,<2.0
