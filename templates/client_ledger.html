@@ -1,0 +1,2174 @@
+{% extends "layout.html" %}
+{% block content %}
+{# ---------------------------------------------------------------------------
+   Client header
+   A single, calm block: identity on the left, the three money figures under
+   it, the client's contact/account details in an even grid, and only the
+   primary actions on the right (the rest live in the "More" menu) so the top
+   of the page never turns into a wall of buttons.
+   --------------------------------------------------------------------------- #}
+{% set _ob = client.opening_balance or 0 %}
+{% set _obd = client.opening_balance_date or client.created_at %}
+{% set _name_parts = (client.name or '?').split() %}
+<div class="ledger-print-area">
+<header class="cl-hero">
+    <div class="cl-hero-top">
+        <div class="cl-hero-id">
+            <div class="cl-avatar" aria-hidden="true">{{ (_name_parts[0][:1] ~ (_name_parts[1][:1] if _name_parts|length > 1 else ''))|upper }}</div>
+            <div class="cl-hero-text">
+                <nav class="cl-crumbs" aria-label="Breadcrumb">
+                    <a href="{{ url_for('clients') }}"><i class="bi bi-people"></i>Client Ledger</a>
+                    <i class="bi bi-chevron-right"></i>
+                    <span>{{ client.code or 'No code' }}</span>
+                </nav>
+                <h1 class="cl-name">{{ client.name }}</h1>
+                <div class="cl-chips">
+                    <span class="cl-chip cl-chip-code"><i class="bi bi-hash"></i>{{ client.code or 'N/A' }}</span>
+                    <span class="cl-chip"><i class="bi bi-tag"></i>{{ client.category or 'General' }}</span>
+                    {% if client.is_active %}
+                    <span class="cl-chip cl-chip-ok"><span class="cl-dot"></span>Active</span>
+                    {% else %}
+                    <span class="cl-chip cl-chip-off"><span class="cl-dot"></span>Suspended</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="cl-hero-actions d-print-none">
+            <a href="{{ url_for('download_full_client_history', id=client.id) }}" class="btn btn-warning btn-sm fw-bold">
+                <i class="bi bi-file-earmark-pdf me-1"></i> Full History PDF
+            </a>
+            <a href="{{ url_for('download_client_clearance', id=client.id) }}" class="btn btn-outline-success btn-sm fw-bold">
+                <i class="bi bi-file-earmark-text me-1"></i> Clearance
+            </a>
+            <a href="{{ url_for('payments_page', party='customer', client=client.code or client.name) }}" class="btn btn-outline-info btn-sm fw-bold">
+                <i class="bi bi-cash-coin me-1"></i> Pay Remaining
+            </a>
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary btn-sm fw-bold cl-more-btn" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-three-dots me-1"></i> More
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end cl-more-menu shadow">
+                    <li>
+                        <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#openingBalanceModal">
+                            <i class="bi bi-wallet2"></i>Set Opening Balance
+                        </button>
+                    </li>
+                    <li>
+                        <form action="{{ url_for('client_toggle_active', client_id=client.id) }}" method="POST">
+                            {% if client.is_active %}
+                            <button type="submit" class="dropdown-item" onclick="return confirm('Suspend this client? Deliveries will be blocked.');">
+                                <i class="bi bi-pause-circle"></i>Suspend Delivery
+                            </button>
+                            {% else %}
+                            <button type="submit" class="dropdown-item" onclick="return confirm('Re-activate this client? Deliveries will be allowed.');">
+                                <i class="bi bi-play-circle"></i>Resume Delivery
+                            </button>
+                            {% endif %}
+                        </form>
+                    </li>
+                    <li>
+                        <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#cancelBookingModal">
+                            <i class="bi bi-x-octagon"></i>Cancel Remaining Booking
+                        </button>
+                    </li>
+                    <li>
+                        <a class="dropdown-item" href="{{ url_for('download_client_ledger', id=client.id) }}?action=print" target="_blank">
+                            <i class="bi bi-printer"></i>Print Ledger
+                        </a>
+                    </li>
+                    {% if current_user.role in ('admin', 'root') or current_user.can_manage_clients %}
+                    <li>
+                        <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#clientLedgerQrModal">
+                            <i class="bi bi-qr-code"></i>QR Code
+                        </button>
+                    </li>
+                    {% endif %}
+                    {% if current_user.role in ('admin', 'root') or current_user.can_manage_clients %}
+                    <li>
+                        <a class="dropdown-item" href="{{ url_for('manage_client_categories') }}">
+                            <i class="bi bi-tags"></i>Manage Categories
+                        </a>
+                    </li>
+                    {% endif %}
+                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                        <a class="dropdown-item" href="{{ url_for('clients') }}">
+                            <i class="bi bi-arrow-left"></i>Back to Client List
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="cl-stats">
+        <div class="cl-stat">
+            <div class="cl-stat-label"><i class="bi bi-arrow-up-right-circle"></i>Total Due (Debit)</div>
+            <div class="cl-stat-value cl-debit">{{ "{:,.2f}".format(total_debit or 0) }}</div>
+        </div>
+        <div class="cl-stat">
+            <div class="cl-stat-label"><i class="bi bi-arrow-down-left-circle"></i>Total Paid / Credit</div>
+            <div class="cl-stat-value cl-credit">{{ "{:,.2f}".format(total_credit or 0) }}</div>
+        </div>
+        <div class="cl-stat cl-stat-net">
+            <div class="cl-stat-label"><i class="bi bi-wallet2"></i>Net Balance</div>
+            <div class="cl-stat-value {% if (total_balance or 0) > 0 %}cl-debit{% elif (total_balance or 0) < 0 %}cl-credit{% endif %}">
+                {{ "{:,.2f}".format(total_balance or 0) }}
+            </div>
+            <div class="cl-stat-sub">
+                {% if (total_balance or 0) > 0 %}Client owes company{% elif (total_balance or 0) < 0 %}Company owes client{% else %}Account settled{% endif %}
+            </div>
+        </div>
+        {% if (undelivered_total or 0) > 0 %}
+        <div class="cl-stat">
+            <div class="cl-stat-label"><i class="bi bi-hourglass-split"></i>Undelivered Booking</div>
+            <div class="cl-stat-value">{{ "{:,.2f}".format(undelivered_total or 0) }}</div>
+            <div class="cl-stat-sub">Still to be delivered — held separately, not in Net Balance</div>
+        </div>
+        {% endif %}
+    </div>
+
+    <dl class="cl-details">
+        <div class="cl-detail">
+            <dt><i class="bi bi-telephone"></i>Phone</dt>
+            <dd>{{ client.phone or '—' }}</dd>
+        </div>
+        <div class="cl-detail">
+            <dt><i class="bi bi-geo-alt"></i>Address</dt>
+            <dd>{{ client.address or '—' }}</dd>
+        </div>
+        <div class="cl-detail">
+            <dt><i class="bi bi-wallet2"></i>Opening Balance</dt>
+            <dd class="{% if _ob > 0 %}cl-debit{% elif _ob < 0 %}cl-credit{% endif %}">
+                {{ "{:,.2f}".format(_ob) }}
+                <span class="cl-detail-sub">
+                    {% if _ob > 0 %}Pending due{% elif _ob < 0 %}Advance / credit{% else %}Settled{% endif %}
+                    {% if _obd %}&middot; {{ _obd.strftime('%d %b %Y') }}{% endif %}
+                </span>
+            </dd>
+        </div>
+        <div class="cl-detail">
+            <dt><i class="bi bi-calendar3"></i>Client Since</dt>
+            <dd>{{ client.created_at.strftime('%d %b %Y') if client.created_at else '—' }}</dd>
+        </div>
+        {% if client.book_no or client.financial_page %}
+        <div class="cl-detail">
+            <dt><i class="bi bi-journal-bookmark"></i>Book / Page</dt>
+            <dd>
+                {{ client.book_no or '—' }}
+                {% if client.financial_page %}<span class="cl-detail-sub">Ledger page {{ client.financial_page }}</span>{% endif %}
+            </dd>
+        </div>
+        {% endif %}
+    </dl>
+</header>
+
+<div class="modal fade" id="openingBalanceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form action="{{ url_for('client_opening_balance', id=client.id) }}" method="POST" class="modal-content border-secondary" style="background: #1e293b;">
+            <div class="modal-header border-0">
+                <h5 class="text-warning fw-bold mb-0">Set Opening Balance</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <label class="text-white-50 small fw-bold mb-1">OPENING BALANCE</label>
+                <input type="number" step="0.01" name="opening_balance" class="form-control bg-dark text-white border-secondary" value="{{ '%.2f'|format(client.opening_balance or 0) }}" required>
+                <small class="text-white-50">Use + for pending due, - for advance/credit.</small>
+                <label class="text-white-50 small fw-bold mb-1 mt-3">OPENING BALANCE DATE</label>
+                <input type="date" name="opening_balance_date" class="form-control bg-dark text-white border-secondary" value="{{ (client.opening_balance_date or client.created_at).strftime('%Y-%m-%d') if (client.opening_balance_date or client.created_at) else '' }}" required>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="submit" class="btn btn-warning text-dark fw-bold w-100">Update Opening Balance</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if current_user.role in ('admin', 'root') or current_user.can_manage_clients %}
+{# Big QR dialog: opened from More -> QR Code.  The body is fetched from the
+   staff-only QR endpoint so the (one-time) generated code, its Download /
+   Print buttons and the generate/revoke controls all live in one place. #}
+<div class="modal fade" id="clientLedgerQrModal" tabindex="-1" aria-labelledby="clientLedgerQrModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content border-secondary" style="background: #0f172a;">
+            <div class="modal-header border-0">
+                <h5 class="modal-title text-warning fw-bold" id="clientLedgerQrModalLabel">
+                    <i class="bi bi-qr-code me-1"></i> Client Ledger QR — {{ client.name }}
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="clientLedgerQrModalBody"
+                 data-qr-url="{{ url_for('ledgers.client_ledger_qr_dialog', client_id=client.id) }}"
+                 data-client-name="{{ client.name }}"
+                 data-client-code="{{ client.code or '' }}">
+                <div class="text-center py-5">
+                    <div class="spinner-border text-warning" role="status"></div>
+                    <div class="text-white-50 small mt-2">Loading QR&hellip;</div>
+                </div>
+            </div>
+            <div class="modal-footer border-0">
+                <a class="btn btn-outline-secondary btn-sm me-auto" target="_blank"
+                   href="{{ url_for('ledgers.client_ledger_qr', client_id=client.id) }}">
+                    <i class="bi bi-box-arrow-up-right me-1"></i> Open QR settings page
+                </a>
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+(function () {
+    var modalEl = document.getElementById('clientLedgerQrModal');
+    var bodyEl = document.getElementById('clientLedgerQrModalBody');
+    if (!modalEl || !bodyEl) return;
+    var endpoint = bodyEl.getAttribute('data-qr-url');
+    var clientName = bodyEl.getAttribute('data-client-name') || 'Client';
+    var clientCode = bodyEl.getAttribute('data-client-code') || '';
+    var loadingHtml = bodyEl.innerHTML;
+
+    function showError(message) {
+        bodyEl.innerHTML = '<div class="alert alert-danger mb-0" role="alert"></div>';
+        bodyEl.firstElementChild.textContent = message;
+    }
+    function loadFragment(html) { bodyEl.innerHTML = html; }
+    function readFragment(response) {
+        // fetch follows login/permission redirects. Never insert a full app
+        // page into this dialog or mistake it for a successful QR operation.
+        if (response.redirected || response.status === 401) {
+            throw new Error('Your session or permissions changed. Reload the ledger and sign in again if needed.');
+        }
+        return response.text().then(function (text) {
+            var contentType = response.headers.get('Content-Type') || '';
+            if (contentType.indexOf('application/json') !== -1) {
+                var result;
+                try { result = JSON.parse(text); } catch (_) { result = {}; }
+                throw new Error(result.error || 'QR request failed (' + response.status + '). Reload the ledger and try again.');
+            }
+            if (text.indexOf('class="cl-qr-dialog ') !== -1) return text;
+            if (response.status === 403) {
+                throw new Error('You do not have permission to change client QR access.');
+            }
+            // Do not expose raw HTML error pages, tracebacks or SQL details.
+            throw new Error('QR request failed (' + response.status + '). Reload the ledger and try again. If it persists, contact support.');
+        });
+    }
+
+    modalEl.addEventListener('show.bs.modal', function () {
+        bodyEl.innerHTML = loadingHtml;
+        fetch(endpoint, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin', cache: 'no-store' })
+            .then(readFragment)
+            .then(loadFragment)
+            .catch(function (err) { showError(err.message || 'QR could not be loaded.'); });
+    });
+    // Never leave a generated (bearer) QR sitting in the page after closing.
+    modalEl.addEventListener('hidden.bs.modal', function () { bodyEl.innerHTML = loadingHtml; });
+
+    // Generate / revoke stay inside the dialog: swap in the returned fragment
+    // (which, after generation, is the big QR with Download / Print below it).
+    bodyEl.addEventListener('submit', function (event) {
+        var form = event.target.closest('.js-qr-dialog-form');
+        if (!form) return;
+        event.preventDefault();
+        var confirmText = form.getAttribute('data-confirm');
+        if (confirmText && !window.confirm(confirmText)) return;
+        var submitBtn = form.querySelector('button[type="submit"]');
+        if (submitBtn) submitBtn.disabled = true;
+        fetch(form.action, {
+            method: 'POST', body: new FormData(form),
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin'
+        })
+            .then(readFragment)
+            .then(loadFragment)
+            .catch(function (err) { showError(err.message || 'Could not reach the server. Check your connection, then reopen the QR dialog.'); });
+    });
+
+    function qrSvg() { return bodyEl.querySelector('#clientLedgerQrCode svg'); }
+    function fileSlug() {
+        return (clientCode || clientName).replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'client';
+    }
+
+    bodyEl.addEventListener('click', function (event) {
+        // Download: rasterise the QR SVG to a large white-backed PNG.
+        if (event.target.closest('#clientLedgerQrDownload')) {
+            var svg = qrSvg();
+            if (!svg) return;
+            var svgText = new XMLSerializer().serializeToString(svg);
+            var img = new Image();
+            img.onload = function () {
+                var size = 1024, quiet = 64;
+                var canvas = document.createElement('canvas');
+                canvas.width = size; canvas.height = size;
+                var ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, size, size);
+                ctx.drawImage(img, quiet, quiet, size - quiet * 2, size - quiet * 2);
+                URL.revokeObjectURL(img.src);
+                canvas.toBlob(function (blob) {
+                    if (!blob) return;
+                    var a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'client-ledger-qr-' + fileSlug() + '.png';
+                    document.body.appendChild(a); a.click(); a.remove();
+                    setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+                }, 'image/png');
+            };
+            img.src = URL.createObjectURL(new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' }));
+            return;
+        }
+        // Print: a clean sheet with just the client name, code and the QR.
+        if (event.target.closest('#clientLedgerQrPrint')) {
+            var code = qrSvg();
+            if (!code) return;
+            var win = window.open('', '_blank', 'width=640,height=760');
+            if (!win) { window.print(); return; }
+            var esc = function (s) { return s.replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+            win.document.write('<!doctype html><html><head><title>Client Ledger QR</title>' +
+                '<style>body{font-family:Arial,Helvetica,sans-serif;text-align:center;padding:24mm 12mm;color:#111}' +
+                'svg{width:82mm;height:82mm}h1{font-size:18px;margin:0 0 4px}p{margin:4px 0}</style></head><body>' +
+                '<h1>' + esc(clientName) + '</h1>' +
+                (clientCode ? '<p>Client code: ' + esc(clientCode) + '</p>' : '') +
+                code.outerHTML +
+                '<p>Scan to view this client\'s current ledger online.</p>' +
+                '<script>window.onload=function(){window.print();};<\/script></body></html>');
+            win.document.close();
+        }
+    });
+})();
+</script>
+{% endif %}
+
+<div class="modal fade" id="cancelBookingModal" tabindex="-1" aria-labelledby="cancelBookingModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content border-secondary" style="background: #0f172a;">
+            <div class="modal-header border-0">
+                <h5 class="modal-title text-warning fw-bold" id="cancelBookingModalLabel">
+                    Cancel Remaining Booking (LIFO)
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                        <div class="p-3 rounded border border-secondary bg-dark h-100">
+                            <div class="text-white-50 small">Current Balance</div>
+                            <div class="text-white fw-bold fs-5">{{ "{:,.2f}".format(total_balance) }}</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="p-3 rounded border border-secondary bg-dark h-100">
+                            <div class="text-white-50 small">Cancel Value</div>
+                            <div class="text-warning fw-bold fs-5">{{ "{:,.2f}".format(cancel_total or 0) }}</div>
+                            <div class="text-white-50 small mt-1">Total Remaining Qty: {{ "{:,.2f}".format(cancel_total_qty or 0) }}</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="p-3 rounded border border-secondary bg-dark h-100">
+                            <div class="text-white-50 small">Balance After Cancel</div>
+                            <div class="fw-bold fs-5 {% if cancel_new_balance < 0 %}text-success{% elif cancel_new_balance > 0 %}text-danger{% else %}text-info{% endif %}">
+                                {{ "{:,.2f}".format(cancel_new_balance or 0) }}
+                            </div>
+                            {% if cancel_company_due > 0 %}
+                            <div class="text-success small mt-1">Pay back to client: {{ "{:,.2f}".format(cancel_company_due) }}</div>
+                            {% elif cancel_client_due > 0 %}
+                            <div class="text-danger small mt-1">Client has to pay: {{ "{:,.2f}".format(cancel_client_due) }}</div>
+                            {% else %}
+                            <div class="text-info small mt-1">Settled</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                {% if cancel_rows and cancel_rows|length > 0 %}
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover align-middle mb-0">
+                        <thead style="background: #020617;">
+                            <tr>
+                                <th class="ps-3 text-center">
+                                    <input type="checkbox" class="form-check-input" id="cancelSelectAll{{ client.id }}" checked
+                                           onclick="toggleCancelRows{{ client.id }}(this.checked)">
+                                </th>
+                                <th class="ps-3">Material</th>
+                                <th>Booking Date</th>
+                                <th>Bill #</th>
+                                <th class="text-end">Remaining Qty</th>
+                                <th class="text-end">Rate</th>
+                                <th class="text-end pe-3">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in cancel_rows %}
+                            <tr style="border-bottom: 1px solid #334155;">
+                                <td class="ps-3 text-center">
+                                    <input type="checkbox"
+                                           class="form-check-input cancel-row-check-{{ client.id }}"
+                                           data-item-id="{{ row.item_id }}"
+                                           value="{{ row.item_id }}"
+                                           checked>
+                                </td>
+                                <td class="ps-3 fw-bold text-white">{{ row.material }}</td>
+                                <td class="text-white-50">{{ row.booking_date }}</td>
+                                <td>
+                                    {% if row.bill_no %}
+                                    <span class="badge bg-dark border border-secondary text-warning">{{ row.bill_no }}</span>
+                                    {% else %}
+                                    <span class="badge bg-dark border border-secondary text-white-50">---</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end text-info fw-bold">{{ "{:,.2f}".format(row.qty_remaining or 0) }}</td>
+                                <td class="text-end text-white-50">{{ "{:,.2f}".format(row.rate or 0) }}</td>
+                                <td class="text-end pe-3 text-warning fw-bold">{{ "{:,.2f}".format(row.amount or 0) }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="p-4 text-center text-white-50">No remaining booking items to cancel.</div>
+                {% endif %}
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                <form id="cancelBookingForm{{ client.id }}" action="{{ url_for('client_booking_cancel', client_id=client.id) }}" method="POST">
+                    <input type="hidden" name="has_selection_ui" value="1">
+                    <input type="hidden" name="selected_item_ids_csv" id="selectedCancelIds{{ client.id }}" value="">
+                    <button type="submit" class="btn btn-warning text-dark fw-bold"
+                            {% if not cancel_rows or cancel_rows|length == 0 %}disabled{% endif %}
+                            onclick="return submitCancelSelection{{ client.id }}();">
+                        Confirm Cancel
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+function toggleCancelRows{{ client.id }}(checked) {
+    document.querySelectorAll('.cancel-row-check-{{ client.id }}').forEach(el => { el.checked = !!checked; });
+}
+function submitCancelSelection{{ client.id }}() {
+    const checked = Array.from(document.querySelectorAll('.cancel-row-check-{{ client.id }}:checked'))
+        .map(el => (el.getAttribute('data-item-id') || '').trim())
+        .filter(Boolean);
+    if (!checked.length) {
+        alert('Select at least one material row to cancel.');
+        return false;
+    }
+    const target = document.getElementById('selectedCancelIds{{ client.id }}');
+    if (target) target.value = checked.join(',');
+    return confirm('Confirm cancellation of selected booking items? This will update booking balances.');
+}
+</script>
+
+{# Tab navigation directly under the header: Ledger (existing view) +
+   Material Analysis (client's billed material breakdown).  Rendered as one
+   full-width segmented bar so the two views read as siblings, not as
+   buttons floating above the content. #}
+<ul class="nav nav-tabs cl-tabs d-print-none" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="ledger-tab" data-bs-toggle="tab" data-bs-target="#ledgerPane" type="button" role="tab" aria-controls="ledgerPane" aria-selected="true">
+            <i class="bi bi-journal-text"></i>
+            <span>Ledger</span>
+            <span class="cl-tab-badge">{{ financial_history|length }}</span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="material-analysis-tab" data-bs-toggle="tab" data-bs-target="#materialAnalysisPane" type="button" role="tab" aria-controls="materialAnalysisPane" aria-selected="false" data-ma-fallback-url="{{ analysis_tab_url }}">
+            <i class="bi bi-pie-chart-line"></i>
+            <span>Material Analysis</span>
+            <span class="cl-tab-badge">{% if analysis_requested %}{{ material_grand.materials }}{% else %}&rarr;{% endif %}</span>
+        </button>
+        {# No-JS path to the same destination; the script below hides it once it
+           has confirmed the pane can be switched in-page. #}
+        <noscript>
+            <a class="nav-link cl-tab-noscript" href="{{ analysis_tab_url }}">
+                <i class="bi bi-pie-chart-line"></i><span>Material Analysis</span>
+            </a>
+        </noscript>
+    </li>
+</ul>
+
+<div class="tab-content">
+<div class="tab-pane fade show active" id="ledgerPane" role="tabpanel" aria-labelledby="ledger-tab">
+
+<!-- Ledger totals (Total Due / Total Paid / Net Balance) now live in the page
+     header (.cl-stats) so they stay visible on every tab and are not repeated
+     twice on one screen.  They are the same three figures the print/PDF
+     summary carries. -->
+
+<!-- Financial Ledger Section -->
+<div class="card border-0 shadow-sm mb-4 financial-ledger-card" style="background: #1e293b; border: 2px solid #475569 !important; border-radius: 15px;">
+    <div class="card-header border-bottom border-secondary py-3 d-flex justify-content-between align-items-center flex-wrap gap-2" style="background: #0f172a;">
+        <h5 class="mb-0 text-success fw-bold"><i class="bi bi-cash-coin me-2"></i>Financial Transaction Ledger</h5>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            {% if financial_pagination and financial_pagination.total %}
+            <span class="badge bg-success text-white">
+                {% if financial_pagination.show_all %}
+                    {{ financial_pagination.total }} Transactions
+                {% else %}
+                    Showing {{ financial_pagination.start }}–{{ financial_pagination.end }} of {{ financial_pagination.total }}
+                {% endif %}
+            </span>
+            {% if financial_pagination.pages > 1 %}
+            <a class="btn btn-sm btn-outline-light py-0 px-2 d-print-none"
+               href="{{ url_for('financial_ledger', client_id=client.id, per_page=0,
+                                mat_page=material_pagination.page if material_pagination and not material_pagination.show_all else None,
+                                mat_per_page=material_pagination.per_page if material_pagination and not material_pagination.show_all else None) }}"
+               title="Render the entire history on one page (heavier on big accounts).">Show all</a>
+            {% endif %}
+            {% endif %}
+        </div>
+    </div>
+    <div class="table-responsive ledger-table-wrap">
+        <table class="table table-dark table-hover align-middle mb-0 financial-ledger-table table-stack-cards">
+            <thead style="background: #0f172a;">
+                <tr>
+                    <th class="fw-bold py-3 ps-4 border-bottom border-secondary text-white-50 ledger-col-date">Date</th>
+                    <th class="fw-bold py-3 border-bottom border-secondary text-white-50 ledger-col-desc">Description</th>
+                    <th class="fw-bold py-3 border-bottom border-secondary text-white-50 ledger-col-bill">Bill #</th>
+                    <th class="fw-bold py-3 border-bottom border-secondary text-white-50 ledger-col-notes">Notes</th>
+                    <th class="fw-bold py-3 text-end border-bottom border-secondary text-white-50">Due Amount</th>
+                    <th class="fw-bold py-3 text-end border-bottom border-secondary text-white-50">Paid Amount</th>
+                    <th class="fw-bold py-3 text-end pe-4 border-bottom border-secondary text-white-50">Pending Amount</th>
+                    <th class="fw-bold py-3 text-end pe-4 border-bottom border-secondary text-white-50 ledger-col-actions">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in financial_history %}
+                <tr style="border-bottom: 1px solid #334155;">
+                    {% set _dtxt = (t.date_display or t.date|string) %}
+                    <td class="ps-4 py-3 small text-white-50 ledger-date-cell" data-label="Date">
+                        <div class="ledger-date-main">{{ _dtxt[:10] }}</div>
+                        <div class="ledger-date-sub">{{ _dtxt[11:16] if _dtxt|length > 15 else '' }}</div>
+                    </td>
+                    <td class="ledger-desc-cell" data-label="Description">
+                        {% if t.is_undelivered_note %}
+                        <span class="text-warning fw-bold">{{ t.description }}</span>
+                        <div class="small text-white-50 mt-1">
+                            <span class="badge bg-secondary text-dark me-1">Not yet delivered</span>
+                            Informational — no amount charged, no balance effect
+                        </div>
+                        {% elif t.is_cancel_entry %}
+                        <span class="text-info fw-bold">{{ t.description }}</span>
+                        <div class="small text-warning mt-1">
+                            <span class="badge bg-warning text-dark me-1">Audit</span>
+                            Cancellation value posted in Paid Amount
+                            {% if t.cancel_amount is not none %}
+                            | Value Rs. {{ "{:,.3f}".format(t.cancel_amount).rstrip('0').rstrip('.') }}
+                            {% endif %}
+                        </div>
+                        {% elif t.type and t.id %}
+                        <a href="{{ url_for('view_bill_detail', type=t.type, id=t.id) }}" class="text-decoration-none text-info fw-bold">
+                            {{ t.description }}
+                        </a>
+                        {% else %}
+                        <span class="text-info fw-bold">{{ t.description }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="ledger-bill-cell" data-label="Bill #">
+                        {% if t.bill_no %}
+                        <a href="{{ url_for('view_bill', bill_no=t.bill_no|replace('#', '%23')) }}" class="badge bg-dark border border-secondary text-warning text-decoration-none">{{ t.bill_no }}</a>
+                        {% else %}
+                        <span class="badge bg-dark border border-secondary text-white-50">---</span>
+                        {% endif %}
+                    </td>
+                    <td class="ledger-note-cell" data-label="Notes">
+                        <span class="small text-white-50 entry-note" title="{{ t.note or '' }}">{{ t.note or '—' }}</span>
+                    </td>
+                    <td class="text-end text-danger fw-bold" data-label="Due Amount">{{ "{:,.3f}".format(t.debit).rstrip('0').rstrip('.') if t.debit > 0 else '---' }}</td>
+                    <td class="text-end text-success fw-bold" data-label="Paid Amount">{{ "{:,.3f}".format(t.credit).rstrip('0').rstrip('.') if t.credit > 0 else '---' }}</td>
+                    <td class="text-end pe-4 fw-bold text-white" data-label="Pending">{{ "{:,.3f}".format(t.balance).rstrip('0').rstrip('.') }}</td>
+                    <td class="text-end pe-4 ledger-actions-cell stack-actions-cell" data-label="Actions">
+                        <div class="dropdown d-inline-block">
+                            <button class="btn btn-sm btn-outline-light dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                Action
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end border-secondary shadow-sm">
+                                {% if t.is_cancel_entry and t.id %}
+                                <li>
+                                    <form action="{{ url_for('client_booking_cancel_revert', client_id=client.id, entry_id=t.id) }}" method="POST" onsubmit="return confirm('Revert this cancellation row? It will add this qty back to booking.');">
+                                        <button type="submit" class="dropdown-item text-success fw-bold">
+                                            <i class="bi bi-arrow-counterclockwise me-2"></i>Revert Cancel
+                                        </button>
+                                    </form>
+                                </li>
+                                <li><hr class="dropdown-divider"></li>
+                                {% endif %}
+                                {% if t.type and t.id and not t.is_cancel_entry %}
+                                <li>
+                                    <a class="dropdown-item action-item-view" href="{{ url_for('view_bill_detail', type=t.type, id=t.id) }}">
+                                        <i class="bi bi-eye me-2"></i>View Detail
+                                    </a>
+                                </li>
+                                {% endif %}
+                                {% if t.bill_no %}
+                                <li>
+                                    <a class="dropdown-item action-item-download" href="{{ url_for('download_invoice', bill_no=t.bill_no|replace('#', '%23')) }}">
+                                        <i class="bi bi-download me-2"></i>Download PDF
+                                    </a>
+                                </li>
+                                <li>
+                                    <a class="dropdown-item action-item-print" target="_blank" href="{{ url_for('download_invoice', bill_no=t.bill_no|replace('#', '%23'), action='print') }}">
+                                        <i class="bi bi-printer me-2"></i>Print PDF
+                                    </a>
+                                </li>
+                                {% endif %}
+                                {% if t.type in ['Booking', 'Payment', 'DirectSale'] and t.id %}
+                                <li><hr class="dropdown-divider"></li>
+                                <li>
+                                    <button type="button" class="dropdown-item text-warning" data-bs-toggle="modal" data-bs-target="#editTransactionModal{{ t.type }}{{ t.id }}">
+                                        <i class="bi bi-pencil me-2"></i>Edit Transaction
+                                    </button>
+                                </li>
+                                <li>
+                                    <form action="{{ url_for('void_transaction', type=t.type, id=t.id) }}" method="POST" onsubmit="var r=prompt('Reason for voiding this transaction? (the record is kept)'); if(!r){return false;} this.reason.value=r; return true;">
+                                        <input type="hidden" name="reason" value="">
+                                        <button type="submit" class="dropdown-item action-item-void">
+                                            <i class="bi bi-trash me-2"></i>Delete Transaction
+                                        </button>
+                                    </form>
+                                </li>
+                                {% endif %}
+                            </ul>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if not financial_history %}
+        <div class="p-5 text-center text-white-50">No financial transactions found.</div>
+        {% endif %}
+    </div>
+    {% if financial_pagination and financial_pagination.pages > 1 %}
+    <div class="card-footer d-print-none d-flex justify-content-between align-items-center flex-wrap gap-2"
+         style="background: #0f172a; border-top: 1px solid #334155;">
+        <div class="small text-white-50">
+            Page {{ financial_pagination.page }} of {{ financial_pagination.pages }}
+            &middot; {{ financial_pagination.total }} rows &middot; newest first
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            {% if financial_pagination.has_prev %}
+            <a class="btn btn-sm btn-outline-success"
+               href="{{ url_for('financial_ledger', client_id=client.id, page=1, per_page=financial_pagination.per_page) }}">&laquo; First</a>
+            <a class="btn btn-sm btn-outline-success"
+               href="{{ url_for('financial_ledger', client_id=client.id, page=financial_pagination.prev_num, per_page=financial_pagination.per_page) }}">Previous</a>
+            {% endif %}
+            {% if financial_pagination.has_next %}
+            <a class="btn btn-sm btn-outline-success"
+               href="{{ url_for('financial_ledger', client_id=client.id, page=financial_pagination.next_num, per_page=financial_pagination.per_page) }}">Next</a>
+            <a class="btn btn-sm btn-outline-success"
+               href="{{ url_for('financial_ledger', client_id=client.id, page=financial_pagination.pages, per_page=financial_pagination.per_page) }}">Last &raquo;</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<div class="row g-4">
+    <!-- Material Transaction Ledger -->
+    <div class="col-lg-12">
+        <div class="card border-0 shadow-sm h-100" style="background: #1e293b; border: 2px solid #475569 !important; border-radius: 15px; overflow: hidden;">
+            <div class="card-header border-bottom border-secondary py-3 d-flex justify-content-between align-items-center" style="background: #0f172a;">
+                <h5 class="mb-0 text-info fw-bold d-flex align-items-center gap-2">
+                    <span><i class="bi bi-box-seam me-2"></i>Material Transaction Ledger (Deliveries)</span>
+                    {% if unresolved_dispatches %}
+                    <span class="badge bg-warning text-dark">Unconfirmed: {{ unresolved_dispatches|length }}</span>
+                    {% endif %}
+                </h5>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    {% if material_pagination and material_pagination.total %}
+                    <span class="badge bg-info text-dark">
+                        {% if material_pagination.show_all %}
+                            {{ material_pagination.total }} Records
+                        {% else %}
+                            {{ material_pagination.total }} Records &middot; page {{ material_pagination.page }}/{{ material_pagination.pages }}
+                        {% endif %}
+                    </span>
+                    {% if material_pagination.pages > 1 %}
+                    <a class="btn btn-sm btn-outline-info py-0 px-2 d-print-none"
+                       href="{{ url_for('financial_ledger', client_id=client.id, mat_per_page=0,
+                                        page=financial_pagination.page if financial_pagination and not financial_pagination.show_all else None,
+                                        per_page=financial_pagination.per_page if financial_pagination and not financial_pagination.show_all else None) }}">Show all</a>
+                    {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-dark table-hover align-middle mb-0 table-stack-cards">
+                    <thead style="background: #020617;">
+                        <tr>
+                            <th class="ps-3">Date</th>
+                            <th>Bill #</th>
+                            <th>Material</th>
+                            <th class="text-end">Qty Added</th>
+                            <th class="text-end">Dispatched</th>
+                            <th class="text-end">Total Remaining</th>
+                            <th>Notes</th>
+                            <th class="text-end pe-3">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for material_name, items in material_history_grouped.items() %}
+                        <tr style="background: #0b1220; border-top: 2px solid #334155; border-bottom: 1px solid #334155;">
+                            <td class="ps-3 py-2 fw-bold text-info stack-card-heading" colspan="8">
+                                Material: {{ material_name }} <span class="text-white-50">({{ items|length }} rows{{ ' on this page' if material_pagination and not material_pagination.show_all and material_pagination.pages > 1 }})</span>
+                                {% set open_bal = material_opening_balance.get(material_name, 0) %}
+                                {% if open_bal %}
+                                <span class="badge bg-dark border border-secondary text-white-50 ms-2">Balance before this page: {{ "{:,.3f}".format(open_bal).rstrip('0').rstrip('.') }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                            {% for m in items %}
+                            <tr style="border-bottom: 1px solid #334155;">
+                                <td class="ps-3 small" data-label="Date">{{ m.date }}</td>
+                                <td data-label="Bill #">
+                                    {% if m.bill_no %}
+                                    <a href="{{ url_for('view_bill', bill_no=m.bill_no|replace('#', '%23')) }}" class="badge bg-dark border border-secondary text-warning text-decoration-none">{{ m.bill_no }}</a>
+                                    {% else %}
+                                    <span class="badge bg-dark border border-secondary text-white-50">---</span>
+                                    {% endif %}
+                                    <br><small class="text-white-50">{{ m.nimbus_no or '' }}</small>
+                                </td>
+                                <td class="fw-bold" data-label="Material">
+                                    {{ m.material_display or m.material }}
+                                    {% if m.type == 'Cancel' or m.nimbus_no == 'Booking Cancel' %}
+                                    <span class="badge bg-danger ms-2">CANCELLED</span>
+                                    {% elif m.type == 'Booking' or m.nimbus_no == 'Booking' %}
+                                    <span class="badge bg-success ms-2">BOOKING ADDED</span>
+                                    {% endif %}
+                                </td>
+                                {% if m.type == 'Cancel' or m.nimbus_no == 'Booking Cancel' %}
+                                <td class="text-end text-warning fw-bold" data-label="Qty Added">booking cancelled</td>
+                                <td class="text-end text-warning fw-bold" data-label="Dispatched">{{ "{:,.3f}".format(m.qty_dispatched or 0).rstrip('0').rstrip('.') if m.qty_dispatched > 0 else '---' }}</td>
+                                <td class="text-end fw-bold text-info" data-label="Total Remaining">{{ "{:,.3f}".format(m.balance or 0).rstrip('0').rstrip('.') }}</td>
+                                {% else %}
+                                <td class="text-end text-success fw-bold" data-label="Qty Added">{{ "{:,.3f}".format(m.qty_added or 0).rstrip('0').rstrip('.') if m.qty_added > 0 else '---' }}</td>
+                                <td class="text-end text-danger fw-bold" data-label="Dispatched">{{ "{:,.3f}".format(m.qty_dispatched or 0).rstrip('0').rstrip('.') if m.qty_dispatched > 0 else '---' }}</td>
+                                <td class="text-end fw-bold text-info" data-label="Total Remaining">{{ "{:,.3f}".format(m.balance or 0).rstrip('0').rstrip('.') }}</td>
+                                {% endif %}
+                                <td class="text-white-50 small" data-label="Notes">
+                                    <span class="small text-white-50" title="{{ m.note or '' }}">{{ m.note or '—' }}</span>
+                                </td>
+                                <td class="text-end pe-3 stack-actions-cell" data-label="Actions">
+                                    {% if m.source_type == 'Booking' and m.source_id %}
+                                    <a href="{{ url_for('view_bill_detail', type='Booking', id=m.source_id) }}" class="btn btn-sm btn-outline-info me-1" title="View"><i class="bi bi-eye"></i></a>
+                                    <form action="{{ url_for('void_transaction', type='Booking', id=m.source_id) }}" method="POST" class="d-inline" onsubmit="var r=prompt('Reason for voiding this booking?'); if(!r){return false;} this.reason.value=r; return true;">
+                                    <input type="hidden" name="reason" value="">
+                                        <button class="btn btn-sm btn-outline-danger" title="Delete"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                    {% elif m.source_id and (m.source_type == 'Entry' or m.type == 'Cancel' or m.nimbus_no == 'Booking Cancel') %}
+                                    {% if m.type == 'Cancel' or m.nimbus_no == 'Booking Cancel' %}
+                                    <form action="{{ url_for('client_booking_cancel_revert', client_id=client.id, entry_id=m.source_id) }}" method="POST" class="d-inline" onsubmit="return confirm('Revert this cancellation row? It will add this qty back to booking.');">
+                                        <button class="btn btn-sm btn-success me-1" title="Revert Cancel">
+                                            <i class="bi bi-arrow-counterclockwise me-1"></i>Revert Cancel
+                                        </button>
+                                    </form>
+                                    {% endif %}
+                                    <form action="{{ url_for('void_transaction', type='Entry', id=m.source_id) }}" method="POST" class="d-inline" onsubmit="var r=prompt('Reason for voiding this stock movement?'); if(!r){return false;} this.reason.value=r; return true;">
+                                    <input type="hidden" name="reason" value="">
+                                        <button class="btn btn-sm btn-outline-danger" title="Delete"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                    {% endif %}
+                                    {% if m.bill_no %}
+                                    <a href="{{ url_for('download_invoice', bill_no=m.bill_no|replace('#', '%23')) }}" class="btn btn-sm btn-outline-warning ms-1" title="Download"><i class="bi bi-download"></i></a>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% if not material_history %}
+                <div class="p-5 text-center text-white-50">No material transactions found.</div>
+                {% endif %}
+            </div>
+            {% if material_pagination and material_pagination.pages > 1 %}
+            <div class="card-footer d-print-none d-flex justify-content-between align-items-center flex-wrap gap-2"
+                 style="background: #0f172a; border-top: 1px solid #334155;">
+                <div class="small text-white-50">
+                    Page {{ material_pagination.page }} of {{ material_pagination.pages }}
+                    &middot; {{ material_pagination.total }} rows
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    {% if material_pagination.has_prev %}
+                    <a class="btn btn-sm btn-outline-info"
+                       href="{{ url_for('financial_ledger', client_id=client.id, mat_page=material_pagination.prev_num, mat_per_page=material_pagination.per_page) }}">Previous</a>
+                    {% endif %}
+                    {% if material_pagination.has_next %}
+                    <a class="btn btn-sm btn-outline-info"
+                       href="{{ url_for('financial_ledger', client_id=client.id, mat_page=material_pagination.next_num, mat_per_page=material_pagination.per_page) }}">Next</a>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Pending Bills Section -->
+    <div class="col-lg-12">
+        <div class="card border-0 shadow-sm h-100" style="background: #1e293b; border: 2px solid #475569 !important; border-radius: 15px; overflow: hidden;">
+            <div class="card-header border-bottom border-secondary py-3 d-flex justify-content-between align-items-center" style="background: #0f172a;">
+                <h5 class="mb-0 text-warning fw-bold"><i class="bi bi-clock-history me-2"></i>Bills (Pending Section)</h5>
+                <span class="badge bg-warning text-dark">{{ pending_bills|length }} Records</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-dark table-hover align-middle mb-0 table-stack-cards">
+                    <thead style="background: #020617;">
+                        <tr>
+                            <th class="ps-3">Bill #</th>
+                            <th class="text-end">Amount</th>
+                            <th>Status</th>
+                            <th class="pe-3">Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for b in pending_bills %}
+                        <tr style="border-bottom: 1px solid #334155;">
+                            <td class="ps-3 fw-bold" data-label="Bill #">
+                                {% if b.bill_no %}
+                                <a href="{{ url_for('view_bill', bill_no=b.bill_no|replace('#', '%23')) }}" class="text-warning text-decoration-none">{{ b.bill_no }}</a>
+                                {% endif %}
+                            </td>
+                            <td class="text-end text-danger fw-bold" data-label="Amount">{{ "{:,.0f}".format(b.amount) }}</td>
+                            <td data-label="Status">
+                                {% if b.is_paid %}
+                                <span class="badge bg-success">Paid</span>
+                                {% else %}
+                                <span class="badge bg-danger">Pending</span>
+                                {% endif %}
+                            </td>
+                            <td class="pe-3 small text-white-50" data-label="Reason" title="{{ b.reason }}">{{ b.reason[:50] }}{% if b.reason|length > 50 %}...{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% if not pending_bills %}
+                <div class="p-5 text-center text-white-50">No pending bills found.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+</div><!-- /ledgerPane -->
+
+<!-- ============================ Material Analysis ============================
+     New, unique tab on the Client Ledger page.  Every figure below is built
+     from THIS client's own booked / direct-sale ledger lines only (see
+     build_client_material_analysis).  Two report options — category-wise and
+     material-wise — each with its own totals and a grand total.
+     ------------------------------------------------------------------------ -->
+<div class="tab-pane fade" id="materialAnalysisPane" role="tabpanel" aria-labelledby="material-analysis-tab" data-analysis-state="{{ analysis_status }}">
+
+    {% if not analysis_requested %}
+    <!-- The aggregation is computed only when this tab is opened (it is a
+         second pass over the client's bill lines), so the first paint of the
+         page does not pay for it.  This notice replaces the panels below. -->
+    <div class="ma-deferred d-print-none">
+        <i class="bi bi-pie-chart-line ma-deferred-icon"></i>
+        <h6 class="ma-deferred-title">Material Analysis is built when you open this tab</h6>
+        <p class="ma-deferred-text mb-3">
+            Every figure here is derived from this client's own bill lines, so the
+            server calculates it on demand instead of on every ledger view.
+        </p>
+        <a class="btn btn-warning fw-bold" href="{{ analysis_tab_url }}">
+            <i class="bi bi-arrow-repeat me-1"></i>Load Material Analysis
+        </a>
+    </div>
+    <style>
+        .ma-deferred { background:#1e293b; border:2px solid #475569; border-radius:15px;
+                       padding:2.5rem 1.5rem; text-align:center; }
+        .ma-deferred-icon { font-size:2.25rem; color:#facc15; display:block; margin-bottom:.75rem; }
+        .ma-deferred-title { color:#f8fafc; font-weight:700; margin-bottom:.5rem; }
+        .ma-deferred-text { color:#94a3b8; max-width:46rem; margin-left:auto; margin-right:auto; }
+    </style>
+    {% else %}
+
+    <!-- ------------------------------ KPI strip -------------------------- -->
+    <div class="row g-3 mb-4 ma-kpi-row">
+        <div class="col-6 col-lg">
+            <div class="ma-kpi">
+                <div class="ma-kpi-label"><i class="bi bi-tags me-1"></i>Categories</div>
+                <div class="ma-kpi-value">{{ category_grand.categories }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
+            <div class="ma-kpi">
+                <div class="ma-kpi-label"><i class="bi bi-box-seam me-1"></i>Materials</div>
+                <div class="ma-kpi-value">{{ material_grand.materials }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
+            <div class="ma-kpi">
+                <div class="ma-kpi-label"><i class="bi bi-123 me-1"></i>Total Quantity</div>
+                <div class="ma-kpi-value">{{ "{:,.3f}".format(material_grand.qty).rstrip('0').rstrip('.') }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
+            <div class="ma-kpi">
+                <div class="ma-kpi-label"><i class="bi bi-cash-stack me-1"></i>Billed Amount</div>
+                <div class="ma-kpi-value">Rs {{ "{:,.2f}".format(material_grand.amount) }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
+            <div class="ma-kpi">
+                <div class="ma-kpi-label"><i class="bi bi-truck me-1"></i>Rental Charges</div>
+                <div class="ma-kpi-value text-warning">Rs {{ "{:,.2f}".format(material_grand.rent) }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ---------------------- Report selection (2 options) ---------------- -->
+    <div class="ma-switch-wrap mb-3">
+        <ul class="nav nav-pills ma-switch d-print-none" role="group" aria-label="Material Analysis report options">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" type="button" data-ma-report="category" aria-pressed="true">
+                    <i class="bi bi-folder2-open me-1"></i>Category-Wise Report
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" type="button" data-ma-report="material" aria-pressed="false">
+                    <i class="bi bi-box-seam me-1"></i>Material-Wise Report
+                </button>
+            </li>
+        </ul>
+        <div class="ma-switch-meta small text-white-50 d-print-none">
+            <span class="me-3"><i class="bi bi-person-badge me-1"></i>Client: {{ client.code or 'N/A' }} &mdash; {{ client.name }}</span>
+            <button type="button" class="btn btn-sm btn-outline-light" id="maPrintBtn">
+                <i class="bi bi-printer me-1"></i>Print report
+            </button>
+        </div>
+    </div>
+    <p class="small text-white-50 mb-4">
+        <i class="bi bi-info-circle me-1"></i>
+        Based on this client's booked and direct-sale bill lines. A line is valued at
+        <span class="text-info">quantity &times; rate &minus; line discount</span>; rental charges are
+        rent / service lines, recognised with the same rule used by the sale form and the P&amp;L.
+    </p>
+
+    <!-- ================== Option 1: Category-Wise Report ================== -->
+    <section id="maCategoryReport" class="ma-report" aria-label="Category-Wise Report">
+        <div class="ma-report-head">
+            <h6 class="ma-report-title"><i class="bi bi-folder2-open me-1"></i>Category-Wise Report</h6>
+            <span class="ma-report-count">{{ category_grand.categories }} categor{{ 'y' if category_grand.categories == 1 else 'ies' }} &middot; {{ material_grand.materials }} materials</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-dark align-middle mb-0 material-analysis-table table-stack-cards">
+                <thead>
+                    <tr>
+                        <th class="ps-3">Category</th>
+                        <th class="text-end">Materials</th>
+                        <th class="text-end">Total Quantity</th>
+                        <th class="text-end">Total Payment</th>
+                        <th class="text-end">Rental Charges</th>
+                        <th class="text-end pe-3">Share of Billed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in category_rows %}
+                    <tr>
+                        <td class="ps-3" data-label="Category">
+                            <span class="ma-cat-name">{{ row.category }}</span>
+                        </td>
+                        <td class="text-end ma-num" data-label="Materials">{{ row.materials }}</td>
+                        <td class="text-end ma-num" data-label="Total Quantity">{{ "{:,.3f}".format(row.qty).rstrip('0').rstrip('.') }}</td>
+                        <td class="text-end ma-num fw-bold" data-label="Total Payment">{{ "{:,.2f}".format(row.payment) }}</td>
+                        <td class="text-end ma-num {% if row.rent > 0 %}text-warning fw-bold{% else %}text-white-50{% endif %}" data-label="Rental Charges">{{ "{:,.2f}".format(row.rent) }}</td>
+                        <td class="text-end pe-3" data-label="Share of Billed">
+                            <div class="ma-share">
+                                <span class="ma-share-bar"><span style="width: {{ row.share }}%;"></span></span>
+                                <span class="ma-share-val">{{ "{:,.1f}".format(row.share) }}%</span>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="ma-empty">
+                            <i class="bi bi-inbox me-2"></i>No billed material lines found for this client yet.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr class="ma-grand-row">
+                        <td class="ps-3" data-label="Grand Total">Grand Total</td>
+                        <td class="text-end ma-num" data-label="Materials">{{ category_grand.materials }}</td>
+                        <td class="text-end ma-num" data-label="Total Quantity">{{ "{:,.3f}".format(category_grand.qty).rstrip('0').rstrip('.') }}</td>
+                        <td class="text-end ma-num" data-label="Total Payment">{{ "{:,.2f}".format(category_grand.payment) }}</td>
+                        <td class="text-end ma-num" data-label="Rental Charges">{{ "{:,.2f}".format(category_grand.rent) }}</td>
+                        <td class="text-end pe-3 ma-num" data-label="Share of Billed">{% if category_grand.payment %}100.0%{% else %}0.0%{% endif %}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </section>
+
+    <!-- ================== Option 2: Material-Wise Report ================== -->
+    <section id="maMaterialReport" class="ma-report" aria-label="Material-Wise Report" style="display: none;">
+        <div class="ma-report-head">
+            <h6 class="ma-report-title"><i class="bi bi-box-seam me-1"></i>Material-Wise Report</h6>
+            <span class="ma-report-count">{{ material_grand.materials }} material{{ '' if material_grand.materials == 1 else 's' }} &middot; {{ material_grand.lines }} billed lines</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-dark align-middle mb-0 material-analysis-table table-stack-cards">
+                <thead>
+                    <tr>
+                        <th class="ps-3 ma-col-index">#</th>
+                        <th>Material</th>
+                        <th>Category</th>
+                        <th class="text-end">Total Quantity</th>
+                        <th class="text-end">Total Amount</th>
+                        <th class="text-end pe-3">Rental Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in material_rows %}
+                    <tr>
+                        <td class="ps-3 ma-col-index stack-no-label" data-label="">{{ loop.index }}</td>
+                        <td data-label="Material">
+                            <span class="ma-mat-name">{{ row.material }}</span>
+                            {% if row.code %}<span class="ma-mat-code">{{ row.code }}</span>{% endif %}
+                            {% if row.unit %}<span class="ma-mat-unit">{{ row.unit }}</span>{% endif %}
+                        </td>
+                        <td data-label="Category">
+                            <span class="ma-cat-chip">{{ row.category }}</span>
+                        </td>
+                        <td class="text-end ma-num" data-label="Total Quantity">{{ "{:,.3f}".format(row.qty).rstrip('0').rstrip('.') }}</td>
+                        <td class="text-end ma-num fw-bold" data-label="Total Amount">{{ "{:,.2f}".format(row.amount) }}</td>
+                        <td class="text-end pe-3 ma-num {% if row.rent > 0 %}text-warning fw-bold{% else %}text-white-50{% endif %}" data-label="Rental Amount">{{ "{:,.2f}".format(row.rent) }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="ma-empty">
+                            <i class="bi bi-inbox me-2"></i>No billed material lines found for this client yet.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr class="ma-grand-row">
+                        <td class="ps-3" data-label="" colspan="3">Grand Total</td>
+                        <td class="text-end ma-num" data-label="Total Quantity">{{ "{:,.3f}".format(material_grand.qty).rstrip('0').rstrip('.') }}</td>
+                        <td class="text-end ma-num" data-label="Total Amount">{{ "{:,.2f}".format(material_grand.amount) }}</td>
+                        <td class="text-end pe-3 ma-num" data-label="Rental Amount">{{ "{:,.2f}".format(material_grand.rent) }}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </section>
+
+    {% endif %}
+</div><!-- /materialAnalysisPane -->
+
+
+</div><!-- /tab-content -->
+
+<script>
+// Material Analysis tab: needs no bootstrap.tab and no round trip when the
+// panel was server-rendered.  When the page was loaded without ?tab=analysis
+// the panel holds a "load" notice instead of figures, so activating the tab
+// navigates to the same URL with tab=analysis (a real link, so it also works
+// with JS disabled -- see the <noscript> entry in the tab bar).
+(function () {
+    var tab = document.getElementById('material-analysis-tab');
+    var pane = document.getElementById('materialAnalysisPane');
+    var ledgerPane = document.getElementById('ledgerPane');
+    if (!tab || !pane || !ledgerPane) return;
+    var deferred = pane.getAttribute('data-analysis-state') === 'deferred';
+    var fallback = tab.getAttribute('data-ma-fallback-url');
+
+    function activate(evt) {
+        if (deferred && fallback) {
+            if (evt) { evt.preventDefault(); }
+            window.location.href = fallback;
+            return;
+        }
+        if (evt) { evt.preventDefault(); }
+        tab.classList.add('active');
+        tab.setAttribute('aria-selected', 'true');
+        pane.classList.add('show', 'active');
+        ledgerPane.classList.remove('show', 'active');
+        var ledgerTab = document.getElementById('ledger-tab');
+        if (ledgerTab) {
+            ledgerTab.classList.remove('active');
+            ledgerTab.setAttribute('aria-selected', 'false');
+        }
+        if (history.replaceState && fallback) {
+            history.replaceState(null, '', fallback);
+        }
+    }
+
+    tab.removeAttribute('data-bs-toggle');
+    tab.addEventListener('click', activate);
+    var ledgerTabEl = document.getElementById('ledger-tab');
+    if (ledgerTabEl) {
+        ledgerTabEl.removeAttribute('data-bs-toggle');
+        ledgerTabEl.addEventListener('click', function (evt) {
+            evt.preventDefault();
+            ledgerTabEl.classList.add('active');
+            ledgerTabEl.setAttribute('aria-selected', 'true');
+            ledgerPane.classList.add('show', 'active');
+            pane.classList.remove('show', 'active');
+            tab.classList.remove('active');
+            tab.setAttribute('aria-selected', 'false');
+        });
+    }
+    // Deep link (?tab=analysis) opens the tab on load.
+    if (fallback && window.location.search.indexOf('tab=analysis') !== -1 && !deferred) {
+        activate(null);
+    }
+})();
+</script>
+
+<script>
+// Material Analysis: switch between the two report options.
+// (Plain JS, no Bootstrap tab dependency — the tab itself stays the only
+// Bootstrap tab on the page.)
+(function () {
+    var buttons = Array.prototype.slice.call(document.querySelectorAll('[data-ma-report]'));
+    if (!buttons.length) return;
+
+    function showReport(report) {
+        buttons.forEach(function (btn) {
+            var on = btn.getAttribute('data-ma-report') === report;
+            btn.classList.toggle('active', on);
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        var panes = {
+            category: document.getElementById('maCategoryReport'),
+            material: document.getElementById('maMaterialReport')
+        };
+        Object.keys(panes).forEach(function (key) {
+            if (panes[key]) panes[key].style.display = (key === report) ? '' : 'none';
+        });
+    }
+
+    buttons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            showReport(btn.getAttribute('data-ma-report'));
+        });
+    });
+
+    var printBtn = document.getElementById('maPrintBtn');
+    if (printBtn) {
+        printBtn.addEventListener('click', function () { window.print(); });
+    }
+})();
+</script>
+
+<!-- Edit Modals for Transaction Types -->
+{% for key, txn in transactions_map.items() %}
+    {% if key.startswith('Payment') %}
+    <div class="modal fade" id="editTransactionModal{{ key }}" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <form action="{{ url_for('edit_ledger_transaction', trans_type='Payment', trans_id=txn.id) }}" method="POST" class="modal-content border-secondary" style="background: #1e293b;">
+                <div class="modal-header border-0">
+                    <h5 class="text-warning fw-bold mb-0">Edit Payment</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Client</label>
+                            <input type="text" name="client_name" class="form-control bg-dark text-white border-secondary" value="{{ txn.client_name }}" disabled>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Amount *</label>
+                            <input type="number" step="0.01" name="amount" class="form-control bg-dark text-white border-secondary" value="{{ '%.2f'|format(txn.amount or 0) }}" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Method</label>
+                            <select name="method" class="form-select bg-dark text-white border-secondary">
+                                <option value="Cash" {{ 'selected' if txn.method == 'Cash' }}>Cash</option>
+                                <option value="Bank" {{ 'selected' if txn.method == 'Bank' }}>Bank</option>
+                                <option value="Cheque" {{ 'selected' if txn.method == 'Cheque' }}>Cheque</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Bill # (Ref)</label>
+                            <input type="text" name="manual_bill_no" class="form-control bg-dark text-white border-secondary" value="{{ txn.manual_bill_no or '' }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Bank Name</label>
+                            <input type="text" name="bank_name" class="form-control bg-dark text-white border-secondary" value="{{ txn.bank_name or '' }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Account Name</label>
+                            <input type="text" name="account_name" class="form-control bg-dark text-white border-secondary" value="{{ txn.account_name or '' }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Account Number</label>
+                            <input type="text" name="account_no" class="form-control bg-dark text-white border-secondary" value="{{ txn.account_no or '' }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Date</label>
+                            <input type="datetime-local" name="date_posted" class="form-control bg-dark text-white border-secondary" value="{{ (txn.date_posted.strftime('%Y-%m-%dT%H:%M') if txn.date_posted else '') }}" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="text-white-50 small fw-bold mb-1">Note</label>
+                            <textarea name="note" class="form-control bg-dark text-white border-secondary" rows="2">{{ txn.note or '' }}</textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-0">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-warning text-dark fw-bold">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% elif key.startswith('Booking') %}
+    <div class="modal fade" id="editTransactionModal{{ key }}" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <form action="{{ url_for('edit_ledger_transaction', trans_type='Booking', trans_id=txn.id) }}" method="POST" class="modal-content border-secondary" style="background: #1e293b;">
+                <div class="modal-header border-0">
+                    <h5 class="text-warning fw-bold mb-0">Edit Booking</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Client</label>
+                            <input type="text" name="client_name" class="form-control bg-dark text-white border-secondary" value="{{ txn.client_name }}" disabled>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Manual Bill #</label>
+                            <input type="text" name="manual_bill_no" class="form-control bg-dark text-white border-secondary" value="{{ txn.manual_bill_no or '' }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Discount</label>
+                            <input type="number" step="0.01" name="discount" class="form-control bg-dark text-white border-secondary" value="{{ '%.2f'|format(txn.discount or 0) }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Discount Reason</label>
+                            <input type="text" name="discount_reason" class="form-control bg-dark text-white border-secondary" value="{{ txn.discount_reason or '' }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Date</label>
+                            <input type="datetime-local" name="date_posted" class="form-control bg-dark text-white border-secondary" value="{{ (txn.date_posted.strftime('%Y-%m-%dT%H:%M') if txn.date_posted else '') }}" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="text-white-50 small fw-bold mb-1">Note</label>
+                            <textarea name="note" class="form-control bg-dark text-white border-secondary" rows="2">{{ txn.note or '' }}</textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-0">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-warning text-dark fw-bold">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% elif key.startswith('DirectSale') %}
+    <div class="modal fade" id="editTransactionModal{{ key }}" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <form action="{{ url_for('edit_ledger_transaction', trans_type='DirectSale', trans_id=txn.id) }}" method="POST" class="modal-content border-secondary" style="background: #1e293b;">
+                <div class="modal-header border-0">
+                    <h5 class="text-warning fw-bold mb-0">Edit Direct Sale</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Client</label>
+                            <input type="text" name="client_name" class="form-control bg-dark text-white border-secondary" value="{{ txn.client_name }}" disabled>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Amount *</label>
+                            <input type="number" step="0.01" name="amount" class="form-control bg-dark text-white border-secondary" value="{{ '%.2f'|format(txn.amount or 0) }}" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Manual Bill #</label>
+                            <input type="text" name="manual_bill_no" class="form-control bg-dark text-white border-secondary" value="{{ txn.manual_bill_no or '' }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Category</label>
+                            <input type="text" name="category" class="form-control bg-dark text-white border-secondary" value="{{ txn.category or '' }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Payment Method</label>
+                            <input type="text" name="payment_method" class="form-control bg-dark text-white border-secondary" value="{{ txn.payment_method or '' }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="text-white-50 small fw-bold mb-1">Date</label>
+                            <input type="datetime-local" name="date_posted" class="form-control bg-dark text-white border-secondary" value="{{ (txn.date_posted.strftime('%Y-%m-%dT%H:%M') if txn.date_posted else '') }}" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="text-white-50 small fw-bold mb-1">Note</label>
+                            <textarea name="note" class="form-control bg-dark text-white border-secondary" rows="2">{{ txn.note or '' }}</textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-0">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-warning text-dark fw-bold">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+{% endfor %}
+
+</div>
+<style>
+.financial-ledger-table {
+    table-layout: fixed;
+    width: 100%;
+}
+.financial-ledger-table .ledger-col-date {
+    width: 96px;
+}
+.financial-ledger-table .ledger-col-desc {
+    width: 34%;
+}
+.financial-ledger-table .ledger-col-bill {
+    width: 120px;
+}
+.financial-ledger-table .ledger-col-notes {
+    width: 18%;
+}
+.financial-ledger-table .ledger-col-actions {
+    width: 96px;
+}
+.financial-ledger-table .ledger-date-cell {
+    white-space: nowrap;
+    line-height: 1.1;
+}
+.financial-ledger-table .ledger-date-main {
+    font-size: 0.78rem;
+}
+.financial-ledger-table .ledger-date-sub {
+    font-size: 0.72rem;
+    opacity: 0.9;
+}
+.financial-ledger-table .ledger-desc-cell {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.2;
+}
+.financial-ledger-table .ledger-bill-cell {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.financial-ledger-table .ledger-note-cell .entry-note {
+    display: inline-block;
+    max-width: 26ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+    cursor: help;
+}
+.financial-ledger-table .ledger-actions-cell {
+    white-space: nowrap;
+}
+/* The card must stay overflow:visible so the row action dropdowns can escape
+   it. Because nothing clips them, the header/table corners have to be rounded
+   by hand or they poke square out of the card's 15px radius (this is what made
+   the Financial Ledger look "off" next to the Material Ledger card). */
+.financial-ledger-card,
+.financial-ledger-card .card-header,
+.financial-ledger-card .card-body {
+    overflow: visible !important;
+}
+.financial-ledger-card > .card-header {
+    border-top-left-radius: 13px;
+    border-top-right-radius: 13px;
+}
+.financial-ledger-card > .ledger-table-wrap {
+    border-bottom-left-radius: 13px;
+    border-bottom-right-radius: 13px;
+}
+.ledger-table-wrap {
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+}
+.financial-ledger-table .dropdown {
+    position: static;
+}
+.financial-ledger-table .dropdown-menu {
+    z-index: 2000;
+    background: #0f172a;
+    border-color: #475569;
+    min-width: 190px;
+}
+.financial-ledger-table .dropdown-item {
+    color: #e2e8f0;
+}
+.financial-ledger-table .dropdown-item:hover,
+.financial-ledger-table .dropdown-item:focus {
+    background: #1e293b;
+    color: #f8fafc;
+}
+.financial-ledger-table .dropdown-item i {
+    display: inline-block;
+    width: 1rem;
+    color: inherit;
+}
+.financial-ledger-table .action-item-view {
+    color: #38bdf8;
+    font-weight: 600;
+}
+.financial-ledger-table .action-item-download {
+    color: #f59e0b;
+    font-weight: 600;
+}
+.financial-ledger-table .action-item-print {
+    color: #34d399;
+    font-weight: 600;
+}
+.financial-ledger-table .action-item-void {
+    color: #f87171;
+    font-weight: 700;
+}
+.financial-ledger-table .action-item-view:hover,
+.financial-ledger-table .action-item-download:hover,
+.financial-ledger-table .action-item-print:hover,
+.financial-ledger-table .action-item-void:hover {
+    filter: brightness(1.08);
+}
+
+/* Mobile: readable, full-width ledger instead of a crushed fixed table.
+   Everything here exists to make the stacked Financial Ledger cards render
+   exactly like the Material Ledger cards below them. */
+@media (max-width: 767.98px) {
+    /* Desktop column sizing must not leak into the stacked card layout. */
+    .financial-ledger-table,
+    .financial-ledger-table .ledger-col-date,
+    .financial-ledger-table .ledger-col-desc,
+    .financial-ledger-table .ledger-col-bill,
+    .financial-ledger-table .ledger-col-notes,
+    .financial-ledger-table .ledger-col-actions {
+        width: 100% !important;
+        min-width: 0 !important;
+        table-layout: auto !important;
+    }
+    /* The date is a normal stacked field here, not a squeezed 96px column. */
+    .financial-ledger-table .ledger-date-cell {
+        white-space: normal !important;
+        line-height: 1.4;
+    }
+    .financial-ledger-table .ledger-date-cell .ledger-date-main {
+        font-size: 0.95rem;
+    }
+    .financial-ledger-table .ledger-date-cell .ledger-date-sub {
+        font-size: 0.82rem;
+        margin-top: 2px;
+        opacity: 0.75;
+    }
+    .financial-ledger-table td {
+        font-size: 0.95rem;
+    }
+    .financial-ledger-table .ledger-note-cell .entry-note {
+        max-width: 100%;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+    }
+    /* Amounts were right-aligned for the desktop table; inside a stacked card
+       they must read left-aligned under their label, like the Material Ledger. */
+    .financial-ledger-table td.text-end {
+        text-align: left !important;
+    }
+    /* Kill the desktop end-padding so every field lines up on one left edge. */
+    .financial-ledger-table td.ps-4,
+    .financial-ledger-table td.pe-4 {
+        padding-left: 0.9rem !important;
+        padding-right: 0.9rem !important;
+    }
+    /* Action dropdown: full-width tap target, menu that cannot spill off-screen. */
+    .financial-ledger-table .ledger-actions-cell .dropdown {
+        position: static;
+    }
+    .financial-ledger-table .ledger-actions-cell .dropdown-toggle {
+        min-height: 38px;
+    }
+    .financial-ledger-table .dropdown-menu {
+        max-width: calc(100vw - 32px);
+    }
+}
+
+/* Tablet / small desktop: keep the fixed financial table readable by letting
+   it scroll horizontally instead of crushing seven columns together. */
+@media (min-width: 768px) and (max-width: 1199.98px) {
+    .financial-ledger-table {
+        min-width: 780px;
+    }
+}
+
+@media print {
+    .sidebar,
+    .navbar,
+    .d-print-none,
+    .modal,
+    .modal-backdrop {
+        display: none !important;
+    }
+    .main-content {
+        margin-left: 0 !important;
+        padding: 0 !important;
+    }
+    .ledger-print-area,
+    .ledger-print-area * {
+        color: #000 !important;
+        text-shadow: none !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        font-weight: 700 !important;
+    }
+    .ledger-print-area .card,
+    .ledger-print-area .modal-content {
+        background: #fff !important;
+        border: 1px solid #000 !important;
+        box-shadow: none !important;
+    }
+    .ledger-print-area .card-header,
+    .ledger-print-area .table thead,
+    .ledger-print-area .bg-dark,
+    .ledger-print-area [style*="background"] {
+        background: #fff !important;
+    }
+    .ledger-print-area .table {
+        font-size: 15px !important;
+        margin-bottom: 0.5rem !important;
+    }
+    .ledger-print-area .table th,
+    .ledger-print-area .table td {
+        border-color: #000 !important;
+        padding: 0.2rem 0.3rem !important;
+    }
+    .ledger-print-area .table-responsive {
+        overflow: visible !important;
+    }
+    .ledger-print-area .badge {
+        background: #fff !important;
+        border: 1px solid #000 !important;
+        color: #000 !important;
+    }
+    .ledger-print-area a {
+        color: #000 !important;
+        text-decoration: none !important;
+    }
+    .ledger-print-area .text-white,
+    .ledger-print-area .text-white-50,
+    .ledger-print-area .text-warning,
+    .ledger-print-area .text-danger,
+    .ledger-print-area .text-success,
+    .ledger-print-area .text-info {
+        color: #000 !important;
+    }
+    .ledger-print-area .row,
+    .ledger-print-area .card,
+    .ledger-print-area table,
+    .ledger-print-area thead,
+    .ledger-print-area tbody,
+    .ledger-print-area tr {
+        page-break-inside: avoid !important;
+        break-inside: avoid-page !important;
+    }
+}
+
+
+/* ---------- Material Analysis tab (Client Ledger) ------------------------
+   Self-contained styles: nothing outside this tab is affected. */
+.ma-kpi {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 0.8rem 1rem;
+    height: 100%;
+}
+.ma-kpi-label {
+    font-size: 0.68rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: #94a3b8;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ma-kpi-value {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ma-switch-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+.ma-switch {
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+.ma-switch .nav-link {
+    border: 1px solid #334155;
+    background: #0f172a;
+    color: #cbd5e1;
+    font-weight: 600;
+    font-size: 0.88rem;
+    padding: 0.45rem 0.85rem;
+    border-radius: 999px;
+}
+.ma-switch .nav-link:hover {
+    background: #1e293b;
+    color: #e2e8f0;
+    border-color: #475569;
+}
+.ma-switch .nav-link.active {
+    background: #0dcaf0;
+    border-color: #0dcaf0;
+    color: #062028;
+    font-weight: 700;
+}
+.ma-switch-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.ma-report-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.6rem;
+}
+.ma-report-title {
+    margin: 0;
+    color: #7dd3fc;
+    font-weight: 700;
+    font-size: 0.86rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.ma-report-count {
+    font-size: 0.78rem;
+    color: #94a3b8;
+    font-variant-numeric: tabular-nums;
+}
+.material-analysis-table {
+    border: 1px solid #334155;
+    border-radius: 12px;
+    overflow: hidden;
+}
+.material-analysis-table thead th {
+    background: #020617 !important;
+    color: #94a3b8 !important;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    border-bottom: 1px solid #475569;
+    padding-top: 0.65rem;
+    padding-bottom: 0.65rem;
+}
+.material-analysis-table tbody tr {
+    border-bottom: 1px solid #334155;
+}
+.material-analysis-table tbody tr:last-child {
+    border-bottom: 0;
+}
+.material-analysis-table tbody tr:hover {
+    background: #243244;
+}
+.material-analysis-table > tbody > tr:hover > td {
+    background: #243244 !important;
+}
+.material-analysis-table tbody td {
+    padding-top: 0.6rem;
+    padding-bottom: 0.6rem;
+    color: #e2e8f0;
+}
+.material-analysis-table tfoot td,
+.material-analysis-table tr.ma-grand-row td {
+    background: #0f172a !important;
+    border-top: 2px solid #475569;
+    color: #fbbf24;
+    font-weight: 700;
+    padding-top: 0.7rem;
+    padding-bottom: 0.7rem;
+}
+.material-analysis-table .ma-num {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.ma-cat-name,
+.ma-mat-name {
+    font-weight: 700;
+    color: #f1f5f9;
+}
+.ma-mat-code {
+    display: inline-block;
+    margin-left: 0.4rem;
+    padding: 0.02rem 0.45rem;
+    border: 1px solid #334155;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    color: #94a3b8;
+    background: #020617;
+    vertical-align: middle;
+}
+.ma-mat-unit {
+    display: inline-block;
+    margin-left: 0.35rem;
+    font-size: 0.72rem;
+    color: #94a3b8;
+    vertical-align: middle;
+}
+.ma-cat-chip {
+    display: inline-block;
+    padding: 0.08rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    border: 1px solid #334155;
+    background: #0f172a;
+    color: #cbd5e1;
+    white-space: nowrap;
+}
+.ma-col-index {
+    width: 3rem;
+    color: #94a3b8 !important;
+    font-variant-numeric: tabular-nums;
+}
+.ma-share {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.45rem;
+}
+.ma-share-bar {
+    display: inline-block;
+    width: 62px;
+    height: 6px;
+    border-radius: 999px;
+    background: #334155;
+    overflow: hidden;
+}
+.ma-share-bar > span {
+    display: block;
+    height: 100%;
+    background: #22d3ee;
+    border-radius: 999px;
+}
+.ma-share-val {
+    min-width: 44px;
+    text-align: right;
+    font-size: 0.78rem;
+    color: #cbd5e1;
+    font-variant-numeric: tabular-nums;
+}
+.ma-empty {
+    padding: 2.5rem 1rem !important;
+    text-align: center;
+    color: #94a3b8 !important;
+}
+@media (max-width: 575.98px) {
+    .ma-share-bar { display: none; }
+    .ma-kpi-value { font-size: 1.05rem; }
+}
+/* ==========================================================================
+   Client header + tab bar
+   One calm block at the top of the page: identity, the three money figures,
+   the client's own details, and a single row of actions.  Everything uses the
+   app theme tokens so it holds up in both the dark and light themes.
+   ========================================================================== */
+.cl-hero {
+    --cl-debit-color: #fb7185;
+    --cl-credit-color: #34d399;
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+    padding: 1.25rem 1.35rem;
+    margin-bottom: 1rem;
+    background: linear-gradient(135deg,
+        color-mix(in srgb, var(--accent) 9%, var(--surface-1)) 0%,
+        var(--surface-1) 42%,
+        var(--surface-1) 100%);
+    border: 1px solid var(--border-strong);
+    border-radius: 18px;
+    box-shadow: 0 10px 28px rgba(2, 6, 23, 0.16);
+}
+html[data-theme="light"] .cl-hero {
+    --cl-debit-color: #be123c;
+    --cl-credit-color: #047857;
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+}
+.cl-hero .cl-debit { color: var(--cl-debit-color) !important; }
+.cl-hero .cl-credit { color: var(--cl-credit-color) !important; }
+
+.cl-hero-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem 1.5rem;
+    flex-wrap: wrap;
+}
+.cl-hero-id {
+    display: flex;
+    align-items: center;
+    gap: 0.95rem;
+    min-width: 0;
+    flex: 1 1 320px;
+}
+.cl-avatar {
+    flex: 0 0 auto;
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    display: grid;
+    place-items: center;
+    font-size: 1.15rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    color: #231800;
+    background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3), 0 6px 16px rgba(217, 119, 6, 0.28);
+}
+.cl-hero-text { min-width: 0; }
+.cl-crumbs {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    line-height: 1.2;
+}
+.cl-crumbs a {
+    color: var(--text-muted);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+.cl-crumbs a:hover { color: var(--accent); }
+.cl-crumbs i { font-size: 0.7rem; opacity: 0.75; }
+.cl-name {
+    margin: 0.2rem 0 0.5rem;
+    font-size: 1.55rem;
+    font-weight: 800;
+    line-height: 1.15;
+    letter-spacing: 0.2px;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+.cl-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+.cl-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.22rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+    font-size: 0.73rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--text-primary);
+    line-height: 1.3;
+    white-space: nowrap;
+}
+.cl-chip i { color: var(--accent); font-size: 0.78rem; }
+.cl-chip-code { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.cl-chip-ok {
+    color: #34d399;
+    border-color: color-mix(in srgb, #34d399 45%, transparent);
+    background: color-mix(in srgb, #34d399 12%, transparent);
+}
+.cl-chip-off {
+    color: #fb7185;
+    border-color: color-mix(in srgb, #fb7185 45%, transparent);
+    background: color-mix(in srgb, #fb7185 12%, transparent);
+}
+html[data-theme="light"] .cl-chip-ok { color: #047857; }
+html[data-theme="light"] .cl-chip-off { color: #be123c; }
+.cl-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    display: inline-block;
+}
+
+/* Actions: three primary actions + a "More" menu for everything else. */
+.cl-hero-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    flex: 0 1 auto;
+}
+.cl-hero-actions .btn {
+    border-radius: 10px;
+    white-space: nowrap;
+}
+.cl-more-menu {
+    min-width: 245px;
+    padding: 0.35rem;
+    border-radius: 12px;
+    background: var(--surface-1);
+    border: 1px solid var(--border-strong);
+}
+.cl-more-menu .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.5rem 0.6rem;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    background: transparent;
+}
+.cl-more-menu .dropdown-item i {
+    width: 1.05rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+}
+.cl-more-menu .dropdown-item:hover,
+.cl-more-menu .dropdown-item:focus {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+.cl-more-menu .dropdown-item:hover i,
+.cl-more-menu .dropdown-item:focus i { color: var(--accent); }
+.cl-more-menu form { margin: 0; }
+.cl-more-menu .dropdown-divider { border-color: var(--border-color); opacity: 1; }
+
+/* Big QR inside the More -> QR Code dialog: crisp white tile at dialog width. */
+.cl-qr-code {
+    width: min(100%, 420px);
+    padding: 14px;
+    background: #fff;
+    border-radius: 14px;
+}
+.cl-qr-code svg { width: 100%; height: auto; display: block; }
+
+/* Money figures */
+.cl-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+.cl-stat {
+    padding: 0.7rem 0.9rem;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+}
+.cl-stat-label {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.2rem;
+}
+.cl-stat-label i { color: var(--accent); font-size: 0.82rem; }
+.cl-stat-value {
+    font-size: 1.28rem;
+    font-weight: 800;
+    line-height: 1.2;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+.cl-stat-sub {
+    margin-top: 0.15rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+/* Client details: an even, labelled grid instead of a run-on line. */
+.cl-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem 1.5rem;
+    margin: 0;
+    padding-top: 0.95rem;
+    border-top: 1px dashed var(--border-color);
+}
+.cl-detail { min-width: 0; }
+.cl-detail dt {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0.2rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.cl-detail dt i { color: var(--accent); font-size: 0.82rem; }
+.cl-detail dd {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+.cl-detail-sub {
+    display: block;
+    margin-top: 0.1rem;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-muted);
+}
+
+/* Tab bar: one segmented control, directly under the header. */
+.cl-tabs.nav-tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+    padding: 0.35rem;
+    margin-bottom: 1.25rem;
+    border: 1px solid var(--border-strong) !important;
+    border-radius: 14px;
+    background: var(--surface-1);
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+.cl-tabs .nav-item { flex: 1 1 0; min-width: 0; }
+.cl-tabs .nav-link {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.62rem 0.9rem !important;
+    border: 1px solid transparent !important;
+    border-radius: 10px !important;
+    background: transparent !important;
+    color: var(--text-muted) !important;
+    font-size: 0.9rem;
+    font-weight: 700;
+    white-space: nowrap;
+    transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.cl-tabs .nav-link i { font-size: 1rem; }
+.cl-tabs .nav-link:hover,
+.cl-tabs .nav-link:focus-visible {
+    color: var(--text-primary) !important;
+    background: color-mix(in srgb, var(--text-primary) 6%, transparent) !important;
+}
+.cl-tabs .nav-link.active {
+    color: #231800 !important;
+    background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%) !important;
+    box-shadow: 0 4px 14px rgba(217, 119, 6, 0.3);
+}
+.cl-tab-badge {
+    min-width: 1.5rem;
+    padding: 0.05rem 0.42rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, currentColor 14%, transparent);
+    font-size: 0.72rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.5;
+}
+
+@media (max-width: 991.98px) {
+    .cl-hero-actions { justify-content: flex-start; }
+}
+@media (max-width: 767.98px) {
+    .cl-hero { padding: 1rem; border-radius: 14px; }
+    .cl-name { font-size: 1.32rem; }
+    .cl-avatar { width: 48px; height: 48px; border-radius: 14px; font-size: 1rem; }
+    .cl-stats { grid-template-columns: 1fr; gap: 0.55rem; }
+    .cl-details { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.7rem 1rem; }
+    .cl-tabs .nav-item { flex: 0 0 auto; }
+    .cl-tabs .nav-link { padding: 0.55rem 0.75rem !important; font-size: 0.85rem; }
+}
+
+/* Print: show only the active tab pane, hide the tab / pill chrome. */
+@media print {
+    .nav-tabs,
+    .nav-pills {
+        display: none !important;
+    }
+    .cl-hero {
+        background: #fff !important;
+        border: 1px solid #999 !important;
+        box-shadow: none !important;
+        padding: 0 0 0.5rem !important;
+        margin-bottom: 0.75rem !important;
+    }
+    .cl-hero-actions { display: none !important; }
+    .cl-avatar { display: none !important; }
+    .cl-name,
+    .cl-stat-value,
+    .cl-detail dd { color: #000 !important; }
+    .cl-chip,
+    .cl-stat,
+    .cl-detail dt,
+    .cl-detail-sub,
+    .cl-crumbs { color: #333 !important; border-color: #999 !important; background: #fff !important; }
+    .tab-pane {
+        display: none !important;
+    }
+    .tab-pane.active,
+    .tab-pane.show {
+        display: block !important;
+    }
+    .ma-kpi {
+        border: 1px solid #999 !important;
+        background: #fff !important;
+    }
+    .ma-kpi-label,
+    .ma-kpi-value {
+        color: #000 !important;
+    }
+    .ma-report-title,
+    .ma-report-count,
+    .ma-cat-name,
+    .ma-mat-name {
+        color: #000 !important;
+    }
+    .material-analysis-table thead th {
+        background: #fff !important;
+        color: #000 !important;
+    }
+    .material-analysis-table tfoot td,
+    .material-analysis-table tr.ma-grand-row td {
+        background: #fff !important;
+        color: #000 !important;
+    }
+    .ma-cat-chip,
+    .ma-mat-code {
+        border-color: #999 !important;
+        background: #fff !important;
+        color: #000 !important;
+    }
+    .ma-switch-wrap,
+    .ma-switch-meta {
+        display: none !important;
+    }
+}
+</style>
+{% endblock %}

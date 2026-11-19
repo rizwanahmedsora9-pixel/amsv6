@@ -1,0 +1,28 @@
+{
+  "product": "AMS SYSTEM FOR EASE",
+  "version": "6.0",
+  "previous_version": "5.2",
+  "schema_version": "v44",
+  "migrations_added": 0,
+  "release_tag": "ams-v6",
+  "built_at_local": "2026-11-19 (Asia/Karachi)",
+  "base_repository_commit": "f3403ca9842a6c4ee7f7fd3abd28cb5068ad266e",
+  "base_repository_commit_note": "v6 is derived from the shipped v5.2 tree. That tree had already diverged from the repository; the fixes in this release were applied to the shipped tree, so the next repository import must carry them (see CHANGELOG_AMSV6.md, finding AMS-2026-1119-03).",
+  "audit_reference": "ERP_AUDIT_2026-11-19 / MASTER_ERP_AUDIT_2026-11-19.md / BUG_REGISTER_2026-11-19.csv",
+  "findings_addressed": {
+    "AMS-2026-1119-01": "fixed \u2014 integrity audit detects deleted receivables, orphan receipts, paid-without-receipt",
+    "AMS-2026-1119-02": "fixed \u2014 /api surface permission-gated with a blueprint-wide deny-by-default floor",
+    "AMS-2026-1119-03": "partially fixed \u2014 version/tag/manifest metadata added; repo-vs-shipped test divergence open",
+    "AMS-2026-1119-04": "fixed \u2014 invalid posting dates refused instead of silently re-dated",
+    "AMS-2026-1119-05": "retracted \u2014 no application defect (audit probe used a non-existent URL)",
+    "AMS-2026-1119-06": "documented \u2014 cash-basis expense policy stated on /system_report"
+  },
+  "verification": {
+    "business_scenario_chain": "86/86",
+    "integrity_sweep": "20/20",
+    "fault_injection_detection": "7/7",
+    "security_probes": "8/8",
+    "fresh_database": true
+  },
+  "database_files_included": false
+}

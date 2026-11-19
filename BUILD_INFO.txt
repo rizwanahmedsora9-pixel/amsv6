@@ -1,0 +1,63 @@
+AMS v6 — FULL APPLICATION, UPDATED 2026-11-19 (audit remediation release)
+==========================================================================
+Built    : 2026-11-19 (Asia/Karachi)
+Version  : 6.0   (VERSION file; application code — schema stays v44, no new migration)
+Supersedes: v5.2 (build 2026-11-16)
+Base rev : repository commit f3403ca9842a6c4ee7f7fd3abd28cb5068ad266e (see RELEASE_METADATA.json)
+Contents : the complete application. Includes every fix from the 2026-11-19 audit:
+             1. /system_report now detects a deleted sale receivable, a deleted booking
+                receivable, an orphan receipt and a bill marked paid with no receipt
+                (AMS-2026-1119-01).
+             2. The /api/* JSON surface is permission-gated; a user with every permission
+                at 0 gets 403 instead of business data, and a blueprint-wide floor makes
+                that the default for future /api routes (AMS-2026-1119-02).
+             3. An impossible posting date is refused with a message instead of being
+                silently re-dated to today (AMS-2026-1119-04).
+             4. The expense cash-basis policy is stated on /system_report (AMS-2026-1119-06).
+             5. Release identity: VERSION, RELEASE_METADATA.json, MANIFEST_SHA256.txt (-03).
+           Full detail, file list and test evidence: CHANGELOG_AMSV6.md
+Excludes : instance/ (fresh DB on first boot), all database files (*.db, -wal, -shm), backups
+           of them, __pycache__, .pytest_cache, .git, .venv, secret_key, logs.
+Verify   : unzip, pip install -r requirements-lock.txt, python main.py -> http://127.0.0.1:5000
+           login Admin / Admin@fbm12345  (change it immediately), then sha256sum -c MANIFEST_SHA256.txt
+Evidence : ERP_AUDIT_2026-11-19/evidence_v6/ — chain 86/86, fault detection 7/7,
+           integrity sweep 20/20, security probes 8/8 on a fresh database with this build.
+Checks   : 86/86 business scenario chain, 20/20 integrity sweep, 7/7 fault-injection
+           detection, 8/8 security probes, zero false positives from the new audit checks.
+
+------------------------------------------------------------------
+(historical) v5.2 build notes follow unchanged.
+------------------------------------------------------------------
+
+AMS full application — local/PA test build
+Built    : 2026-11-16 (Asia/Karachi)
+Source   : local git HEAD a3107ff (not pushed anywhere; no VCS required to run)
+Contents : whitelist-only application files. Excludes: .git, instance/ (fresh DB on first boot),
+           APPLICATION_AUDIT/, .github/, CONTRIBUTING.md, docs/, scratch/, extra_docx.zip,
+           all __pycache__/bytecode/logs. Includes everything needed to run locally (see LOCAL_RUN.md).
+Verify   : unzip, pip install -r requirements-lock.txt, python main.py -> http://127.0.0.1:5000
+           default login Admin / Admin@fbm12345 (change immediately)
+SelfCheck: python tests/run_all.py (see tests/README.md; optional 10k-row durability via
+           tests/scale_seed.py + tests/scale_verify.py). Expect 12/12, 25/25, 22/22 PASS.
+Files    : 506
+
+------------------------------------------------------------------
+PATCH 2026-11-17 — "database is locked" on save (POST /add_client)
+------------------------------------------------------------------
+Problem : SQLite's rollback journal (forced on PythonAnywhere, whose /home is
+          NFS) lets an open READER block a save's COMMIT. A save landing during
+          a long page render waited the full 15 s busy_timeout, then returned
+          500 with "database is locked" (traceback failed at db.session.commit).
+Fix     : app/services/db_busy.py + install_busy_retry(app) in app/__init__.py
+          Every mutating route (268 handlers) now waits up to 30 s for the lock
+          and retries; if it is still busy the user is told "nothing was saved,
+          press Save again" instead of getting a 500. Non-lock DB errors are
+          never retried; imports/backups/restores/exports/mail are excluded.
+Verified: reader holding the lock 20 s -> save SUCCEEDS (was 500 at 15.0 s)
+          lock never released          -> friendly message, no 500
+          genuine DB error            -> still reported (correct)
+Tuning  : AMS_BUSY_RETRY_BUDGET_SECONDS (default 30), AMS_BUSY_RETRY=0 disables.
+Notes   : Keep SQLITE_JOURNAL_MODE=DELETE on PythonAnywhere. Do NOT enable WAL
+          there (needs shared memory NFS cannot provide).
+See     : PATCH-DB-LOCKED-FIX.md
+Files   : 503

@@ -1,0 +1,443 @@
+{% extends "layout.html" %}
+{% from "_ui/page_header.html" import render as ui_header %}
+{% from "_ui/kpi_tile.html" import tile as ui_tile %}
+{% from "_ui/data_table_card.html" import card as ui_table_card %}
+{% from "_ui/filter_bar.html" import bar as ui_filter_bar %}
+{% block content %}
+<div class="ui-v2">
+
+  {% set _toolbar %}
+    <a href="{{ url_for('inventory.lost_ledger') }}" class="btn btn-outline-danger btn-pill fw-bold">
+      <i class="bi bi-exclamation-triangle me-1"></i> Lost Ledger
+    </a>
+    <a href="{{ url_for('inventory.daily_transactions', date_from=date_from, date_to=date_to) }}" class="btn btn-warning btn-pill fw-bold">
+      <i class="bi bi-list-check me-1"></i> Daily Breakdown
+    </a>
+    <a href="/" class="btn btn-outline-secondary btn-pill fw-bold">
+      <i class="bi bi-arrow-left me-1"></i> Back
+    </a>
+    <button type="button" class="btn btn-outline-secondary btn-pill fw-bold" onclick="window.print()">
+      <i class="bi bi-printer"></i>
+    </button>
+  {% endset %}
+  {{ ui_header('bi-graph-up', 'Stock Summary', subtitle=(date_from ~ ' → ' ~ date_to), toolbar=_toolbar) }}
+
+  {% call ui_filter_bar(action=url_for('inventory.stock_summary')) %}
+    <div class="ui-field ui-col-3">
+      <label class="ui-label">From</label>
+      <input type="date" name="date_from" value="{{ date_from }}" class="form-control">
+    </div>
+    <div class="ui-field ui-col-3">
+      <label class="ui-label">To</label>
+      <input type="date" name="date_to" value="{{ date_to }}" class="form-control">
+    </div>
+    <div class="ui-field ui-col-3 position-relative">
+      <label class="ui-label">Material</label>
+      <div class="input-group">
+        <input type="text"
+               name="material"
+               id="stockFilterMaterial"
+               value="{{ material_filter or '' }}"
+               class="form-control"
+               placeholder="Search material..."
+               autocomplete="off"
+               role="combobox"
+               aria-autocomplete="list"
+               aria-haspopup="listbox"
+               aria-expanded="false"
+               aria-controls="stockFilterMaterialList"
+               data-combo-list="stockFilterMaterialList">
+        <button class="btn btn-outline-secondary" type="button" data-combo-toggle data-combo-list="stockFilterMaterialList" data-combo-input="stockFilterMaterial"><i class="bi bi-chevron-down text-warning"></i></button>
+      </div>
+      <div id="stockFilterMaterialList" class="combobox-list shadow-lg" style="display:none;" role="listbox">
+        <div class="combobox-item" data-combo-code="" data-combo-name="" data-combo-input="stockFilterMaterial">
+          <span class="fw-bold text-danger">All Materials</span>
+        </div>
+        {% for m in materials %}
+        <div class="combobox-item" data-combo-code="{{ m.name }}" data-combo-name="{{ m.name }}" data-combo-input="stockFilterMaterial">
+          <span class="fw-bold text-warning code-span">{{ m.name }}</span>
+          {% if m.category %}
+          <span class="ms-2 opacity-75 small name-span">{{ m.category.name }}</span>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="ui-field ui-col-2 position-relative">
+      <label class="ui-label">Category</label>
+      <div class="input-group">
+        <input type="text"
+               id="stockFilterMaterialCat"
+               value="{{ category_name or '' }}"
+               class="form-control"
+               placeholder="All categories..."
+               autocomplete="off"
+               role="combobox"
+               aria-autocomplete="list"
+               aria-haspopup="listbox"
+               aria-expanded="false"
+               aria-controls="stockFilterMaterialCatList"
+               data-combo-list="stockFilterMaterialCatList"
+               data-combo-value-input="stockFilterMaterialCatValue">
+        <button class="btn btn-outline-secondary" type="button" data-combo-toggle data-combo-list="stockFilterMaterialCatList" data-combo-input="stockFilterMaterialCat"><i class="bi bi-chevron-down text-warning"></i></button>
+      </div>
+      <input type="hidden" name="material_category" id="stockFilterMaterialCatValue" value="{{ category_filter or '' }}">
+      <div id="stockFilterMaterialCatList" class="combobox-list shadow-lg" style="display:none;" role="listbox" data-value-input-id="stockFilterMaterialCatValue" data-store="name">
+        <div class="combobox-item" data-combo-code="" data-combo-name="" data-combo-input="stockFilterMaterialCat" data-combo-value-input="stockFilterMaterialCatValue">
+          <span class="fw-bold text-danger">All Categories</span>
+        </div>
+        {% for cat in categories %}
+        <div class="combobox-item" data-combo-code="{{ cat.id }}" data-combo-name="{{ cat.name }}" data-combo-input="stockFilterMaterialCat" data-combo-value-input="stockFilterMaterialCatValue">
+          <span class="fw-bold text-warning code-span">{{ cat.name }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="ui-actions ui-col-1">
+      <label class="ui-label">&nbsp;</label>
+      <button class="btn btn-warning w-100"><i class="bi bi-funnel me-1"></i> Apply</button>
+    </div>
+    <div class="ui-actions ui-col-12">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('inventory.stock_summary') }}">
+        <i class="bi bi-arrow-counterclockwise me-1"></i> Reset
+      </a>
+    </div>
+  {% endcall %}
+
+  <div class="ui-kpi-grid">
+    {{ ui_tile(
+      href=url_for('inventory.daily_transactions', date_from=date_from, date_to=date_to, material=material_filter, material_category=category_filter),
+      label='Total Received',
+      value=("%.2f"|format(grand_received)),
+      icon='bi-box-arrow-in-down',
+      colour='green',
+      sub='Across selected range',
+      cta='Open daily breakdown'
+    ) }}
+    {{ ui_tile(
+      href=url_for('inventory.daily_transactions', date_from=date_from, date_to=date_to, material=material_filter, material_category=category_filter),
+      label='Total Delivered',
+      value=("%.2f"|format(grand_delivered)),
+      icon='bi-box-arrow-up-right',
+      colour='cyan',
+      sub='Across selected range',
+      cta='Open daily breakdown'
+    ) }}
+    {{ ui_tile(
+      href=url_for('inventory.daily_transactions', date_from=date_from, date_to=date_to, material=material_filter, material_category=category_filter),
+      label='Net Movement',
+      value=("%.2f"|format(grand_net)),
+      icon='bi-graph-up-arrow',
+      colour=('amber' if grand_net >= 0 else 'rose'),
+      sub='Received − Delivered',
+      cta='Open daily breakdown'
+    ) }}
+  </div>
+
+  {% call ui_table_card('Material-Wise Totals', icon='bi-tags') %}
+    <table class="ui-table">
+      <thead>
+        <tr>
+          <th>Material</th>
+          <th class="num">Received</th>
+          <th class="num">Delivered</th>
+          <th class="num">Net</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in totals_by_material %}
+        <tr>
+          <td class="fw-bold">{{ row.material }}</td>
+          <td class="num pos">{{ "%.2f"|format(row.received) }}</td>
+          <td class="num">{{ "%.2f"|format(row.delivered) }}</td>
+          {% set net_cls = 'pos' if row.net >= 0 else 'neg' %}
+          <td class="num {{ net_cls }}">{{ "%.2f"|format(row.net) }}</td>
+        </tr>
+        {% else %}
+        <tr><td class="ui-empty" colspan="4">No transactions found in this range.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endcall %}
+
+  {% call ui_table_card('GRN Receipts (Incoming Stock History)', icon='bi-box-arrow-in-down') %}
+    <p class="text-white-50 small mb-3">
+      Every incoming movement in this range that traces to a GRN — the actual
+      GRN document (bill + supplier) is preserved, so "Received" above is
+      auditable history, not just an added quantity.
+    </p>
+    <table class="ui-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>GRN Bill</th>
+          <th>Supplier</th>
+          <th>Material</th>
+          <th class="num">Qty Received</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in grn_receipts %}
+        <tr>
+          <td>{{ r.date }}</td>
+          <td class="fw-bold">{{ r.bill_no }}</td>
+          <td>{{ r.supplier }}</td>
+          <td>{{ r.material }}</td>
+          <td class="num pos">{{ "%.2f"|format(r.qty) }}</td>
+        </tr>
+        {% else %}
+        <tr><td class="ui-empty" colspan="5">No GRN receipts in this range.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endcall %}
+
+  {% call ui_table_card('Day-Wise Totals', icon='bi-calendar3') %}
+    <table class="ui-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th class="num">Received</th>
+          <th class="num">Delivered</th>
+          <th class="num">Net</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in day_wise %}
+        <tr>
+          <td class="fw-bold">{{ row.date }}</td>
+          <td class="num pos">{{ "%.2f"|format(row.received) }}</td>
+          <td class="num">{{ "%.2f"|format(row.delivered) }}</td>
+          {% set net_cls = 'pos' if row.net >= 0 else 'neg' %}
+          <td class="num {{ net_cls }}">{{ "%.2f"|format(row.net) }}</td>
+        </tr>
+        {% else %}
+        <tr><td class="ui-empty" colspan="4">No day-wise data found in this range.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endcall %}
+
+  {% set _snap_toolbar %}
+    <a href="{{ url_for('inventory.lost_ledger', date_from=sel_date, date_to=sel_date) }}" class="btn btn-outline-danger btn-sm">
+      <i class="bi bi-journal-minus me-1"></i> View {{ sel_date }} Adjustments ({{ adjustments_today|length }})
+    </a>
+  {% endset %}
+  <div class="ui-card">
+    <div class="ui-card-header">
+      <h5><i class="bi bi-camera"></i> Selected Date Snapshot &amp; Physical Stock Count ({{ sel_date }})</h5>
+      <div class="ui-toolbar">{{ _snap_toolbar }}</div>
+    </div>
+    <form method="POST" action="{{ url_for('inventory.stock_summary_save_physical') }}" id="physicalCountForm">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="date_from" value="{{ date_from }}">
+      <input type="hidden" name="date_to" value="{{ date_to }}">
+      <input type="hidden" name="adjustment_date" value="{{ sel_date }}">
+      <input type="hidden" name="material" value="{{ material_filter }}">
+      <input type="hidden" name="material_category" value="{{ category_filter }}">
+      <div class="ui-card-body flush">
+        <div class="ui-table-wrap">
+          <table class="ui-table">
+            <thead>
+              <tr>
+                <th>Material Brand</th>
+                <th>Category</th>
+                <th class="num">Opening</th>
+                <th class="num">Stock In</th>
+                <th class="num">Stock Out</th>
+                <th class="num">Closing</th>
+                <th class="num">Value at Cost</th>
+                <th class="num" style="min-width: 120px;">Physical Count</th>
+                <th class="num">Diff</th>
+                <th class="num">Est. P&amp;L Impact</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in stats %}
+              <tr>
+                <td class="fw-bold">
+                  {{ s.name }}
+                  <input type="hidden" name="material_name" value="{{ s.name }}">
+                  {% if s.adj_refs %}
+                  <div class="small mt-1">
+                    <a href="{{ url_for('inventory.lost_ledger', date_from=sel_date, date_to=sel_date, material=s.name) }}"
+                       class="badge bg-danger-subtle text-danger border border-danger border-opacity-25 text-decoration-none">
+                      Adjusted {{ '+' if s.adj_net > 0 else '' }}{{ "{:g}".format(s.adj_net) }} ({{ s.adj_refs|join(', ') }})
+                    </a>
+                  </div>
+                  {% endif %}
+                </td>
+                <td class="text-muted">{{ s.category or 'General' }}</td>
+                <td class="num">{{ "{:g}".format(s.opening) }}</td>
+                <td class="num pos">+{{ "{:g}".format(s.in) }}</td>
+                <td class="num">-{{ "{:g}".format(s.out) }}</td>
+                <td class="num warn fw-bold">{{ "{:g}".format(s.closing) }}</td>
+                <td class="num">{{ "{:,.2f}".format(s.stock_value) }}
+                  {% if s.unit_cost %}<div class="small text-muted">{{ "{:,.2f}".format(s.unit_cost) }} / {{ s.unit }}</div>{% endif %}
+                </td>
+                <td class="num">
+                  <input type="number" step="any" min="0" name="physical_qty"
+                         class="form-control form-control-sm text-center fw-bold physical-count-input"
+                         placeholder="Count ({{ s.unit }})"
+                         data-closing="{{ s.closing }}"
+                         data-cost="{{ s.unit_cost }}"
+                         oninput="updateDiff(this, {{ s.closing }}, {{ s.unit_cost }}, 'diff-{{ loop.index }}', 'impact-{{ loop.index }}')">
+                </td>
+                <td class="num fw-bold" id="diff-{{ loop.index }}">--</td>
+                <td class="num small" id="impact-{{ loop.index }}">--</td>
+              </tr>
+              {% else %}
+              <tr><td class="ui-empty" colspan="10">No snapshot data found.</td></tr>
+              {% endfor %}
+            </tbody>
+            {% if stats %}
+            <tfoot>
+              <tr>
+                <td class="fw-bold">Total stock value on hand</td>
+                <td colspan="6" class="text-muted small">Closing quantity &times; FIFO cost per unit (the same cost the Profit &amp; Loss uses)</td>
+                <td class="num fw-bold">{{ "{:,.2f}".format(grand_stock_value) }}</td>
+                <td colspan="2"></td>
+              </tr>
+            </tfoot>
+            {% endif %}
+          </table>
+        </div>
+      </div>
+      {% if stats %}
+      <div class="ui-card-body border-top d-flex flex-wrap align-items-end justify-content-between gap-3">
+        <div class="d-flex flex-wrap align-items-end gap-2 flex-grow-1">
+          <div style="min-width: 200px;">
+            <label class="ui-label">Reason (if variance)</label>
+            <select name="reason" class="form-select form-select-sm">
+              <option value="">Auto (Physical Count Shortage / Surplus)</option>
+              {% for r in all_reasons %}
+                <option value="{{ r }}">{{ r }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="flex-grow-1" style="min-width: 220px;">
+            <label class="ui-label">Count Note (optional)</label>
+            <input type="text" name="note" class="form-control form-control-sm" placeholder="e.g. Evening physical stock verification">
+          </div>
+        </div>
+        <div class="d-flex align-items-center gap-3">
+          <span class="small text-muted fw-bold" id="physicalSummaryStatus">Enter physical counts to adjust variances</span>
+          <button type="submit" class="btn btn-warning fw-bold px-3">
+            <i class="bi bi-check2-circle me-1"></i> Save Physical Count &amp; Adjust Stock
+          </button>
+        </div>
+      </div>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+<script>
+function updateDiff(input, closing, unitCost, diffId, impactId) {
+  let raw = (input.value || '').trim();
+  let cell = document.getElementById(diffId);
+  let impCell = document.getElementById(impactId);
+  if (!cell) return;
+  cell.classList.remove('pos', 'neg', 'warn');
+  if (impCell) impCell.classList.remove('pos', 'neg', 'warn', 'text-muted');
+  if (raw === '') {
+    cell.innerText = '--';
+    if (impCell) impCell.innerText = '--';
+    refreshPhysicalSummary();
+    return;
+  }
+  let physical = parseFloat(raw);
+  if (isNaN(physical)) {
+    cell.innerText = '--';
+    if (impCell) impCell.innerText = '--';
+    refreshPhysicalSummary();
+    return;
+  }
+  let diff = Math.round((physical - closing) * 10000) / 10000;
+  let diffText = (diff > 0 ? '+' : '') + (Number.isInteger(diff) ? diff.toFixed(0) : diff.toFixed(2));
+  cell.innerText = diffText;
+  if (Math.abs(diff) < 1e-6) {
+    cell.classList.add('pos');
+    if (impCell) {
+      impCell.innerText = 'Matched';
+      impCell.classList.add('pos');
+    }
+  } else {
+    cell.classList.add(diff < 0 ? 'neg' : 'pos');
+    if (impCell) {
+      if (unitCost > 0) {
+        let amt = Math.abs(diff) * unitCost;
+        let fmt = amt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        impCell.innerText = (diff < 0 ? '-Rs. ' : '+Rs. ') + fmt;
+        impCell.classList.add(diff < 0 ? 'neg' : 'pos');
+      } else {
+        impCell.innerText = (diff < 0 ? 'Loss (unpriced)' : 'Surplus (unpriced)');
+        impCell.classList.add('text-muted');
+      }
+    }
+  }
+  refreshPhysicalSummary();
+}
+
+function refreshPhysicalSummary() {
+  let statusEl = document.getElementById('physicalSummaryStatus');
+  if (!statusEl) return;
+  let inputs = document.querySelectorAll('.physical-count-input');
+  let counted = 0;
+  let varied = 0;
+  inputs.forEach(function (inp) {
+    let raw = (inp.value || '').trim();
+    if (raw === '') return;
+    let val = parseFloat(raw);
+    if (isNaN(val)) return;
+    counted += 1;
+    let closing = parseFloat(inp.getAttribute('data-closing') || '0') || 0;
+    if (Math.abs(val - closing) > 1e-6) varied += 1;
+  });
+  if (counted === 0) {
+    statusEl.innerText = 'Enter physical counts to adjust variances';
+  } else {
+    statusEl.innerText = counted + ' counted · ' + varied + ' variance(s) will update stock & P&L';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  const matCatInput = document.getElementById('stockFilterMaterialCat');
+  const matCatValue = document.getElementById('stockFilterMaterialCatValue');
+  const matCatList = document.getElementById('stockFilterMaterialCatList');
+  if (matCatInput && matCatValue && matCatList) {
+    const syncStockCatHidden = function () {
+      if (matCatInput.dataset.comboSuppress === '1') return;
+      const typed = (matCatInput.value || '').trim().toLowerCase();
+      if (!typed) {
+        matCatValue.value = '';
+        return;
+      }
+      let matchedId = '';
+      matCatList.querySelectorAll('.combobox-item[data-combo-name]').forEach(function (item) {
+        const cname = (item.getAttribute('data-combo-name') || '').trim().toLowerCase();
+        if (cname && cname === typed) {
+          matchedId = item.getAttribute('data-combo-code') || '';
+        }
+      });
+      matCatValue.value = matchedId;
+    };
+    matCatInput.addEventListener('input', syncStockCatHidden);
+    const filterForm = matCatInput.closest('form');
+    if (filterForm) {
+      filterForm.addEventListener('submit', function () {
+        const typed = (matCatInput.value || '').trim();
+        if (!typed) {
+          matCatValue.value = '';
+        } else if (!matCatValue.value) {
+          syncStockCatHidden();
+          if (!matCatValue.value) {
+            matCatValue.value = typed;
+          }
+        }
+      });
+    }
+  }
+});
+</script>
+{% endblock %}

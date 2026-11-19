@@ -1,0 +1,182 @@
+{# Shared table for: all / logins / added / edited / deleted / views.
+   Every value comes from a real ActivityEvent row. An empty table says why. #}
+{% set is_views = (tab == 'views') %}
+
+<div class="ui-card">
+  <div class="ui-card-header">
+    <h5><i class="bi {{ tab_meta[tab][1] }}"></i> {{ tab_meta[tab][0] }}
+      <span class="logs-count ms-2">{{ '{:,}'.format(pager.total) }} row{{ '' if pager.total == 1 else 's' }}</span>
+    </h5>
+    <div class="ui-toolbar d-flex gap-2 align-items-center">
+      <span class="logs-count">{{ filters.describe() }}</span>
+    </div>
+  </div>
+
+  <div class="ui-table-wrap">
+    <table class="ui-table">
+      <thead>
+        <tr>
+          <th style="width:150px;">When</th>
+          {% if is_views %}
+            <th>Page</th>
+            <th>User</th>
+            <th class="num">Views</th>
+            <th class="num">Minutes</th>
+          {% else %}
+            <th>What happened</th>
+            <th>Entry</th>
+            <th class="num">Amount</th>
+            <th>By</th>
+            <th>Where</th>
+            {% if tab == 'logins' %}<th>From</th>{% endif %}
+            {% if tab == 'edited' %}<th style="width:34%;">Changes</th>{% endif %}
+          {% endif %}
+          <th style="width:60px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in pager.rows %}
+        <tr>
+          <td class="logs-when">
+            {{ r.occurred_at.strftime('%Y-%m-%d %H:%M:%S') if r.occurred_at else '' }}
+            <span class="logs-age">{{ r.occurred_at | age }}</span>
+          </td>
+
+          {% if is_views %}
+            <td>
+              <div class="logs-summary">{{ r.entity_label or r.path }}</div>
+              <div class="logs-sub"><code class="logs-chip">{{ r.path or '—' }}</code></div>
+            </td>
+            <td>{{ r.username or '—' }}</td>
+            <td class="num">{{ '{:,}'.format(r.hits or 1) }}</td>
+            <td class="num">{{ r.bucket_minute or '—' }}</td>
+          {% else %}
+            <td>
+              {% if tab == 'all' %}
+                {# One stream: the category is the important label, and a failed
+                   result is called out beside it. #}
+                <span class="logs-pill {{ r.category }}">{{ r.category }}</span>
+                {% if r.result and r.result != 'success' %}
+                  <span class="logs-pill {{ r.result }}">{{ r.result }}</span>
+                {% endif %}
+              {% elif tab == 'logins' or r.result not in ('success',) %}
+                <span class="logs-pill {{ r.result }}">{{ r.result }}</span>
+              {% else %}
+                <span class="logs-pill {{ r.category }}">{{ r.category }}</span>
+              {% endif %}
+              <div class="logs-summary mt-1">{{ r.summary or r.action }}</div>
+              {% if r.is_derived %}<div class="logs-sub"><span class="logs-pill" style="color:var(--ui-text-muted);background:var(--ui-surface-3);">part of the same save</span></div>{% endif %}
+            </td>
+            <td>
+              {% if r.entity_label %}
+                <div class="logs-summary">{{ r.entity_label }}</div>
+              {% endif %}
+              {% if r.entity_type %}
+                <div class="logs-sub">
+                  <code class="logs-chip">{{ r.entity_type }}{% if r.entity_id %} #{{ r.entity_id }}{% endif %}</code>
+                  {% if r.action %}<span class="ms-1">{{ r.action }}</span>{% endif %}
+                </div>
+              {% elif r.action %}
+                <div class="logs-sub">{{ r.action }}</div>
+              {% endif %}
+            </td>
+            <td class="num logs-money">
+              {% if r.amount_minor is not none %}Rs {{ '{:,.0f}'.format(r.amount_minor / 100) }}{% else %}—{% endif %}
+            </td>
+            <td>
+              <div class="fw-bold">{{ r.username or '—' }}</div>
+              {% if r.role %}<div class="logs-sub">{{ r.role }}</div>{% endif %}
+            </td>
+            <td>
+              <div class="logs-sub">{{ r.module or '—' }}</div>
+              {% if r.path %}<div class="logs-sub"><code class="logs-chip">{{ r.path }}</code></div>{% endif %}
+            </td>
+            {% if tab == 'logins' %}
+              <td>
+                <div>{{ r.ip or '—' }}</div>
+                {% if r.duration_ms is not none %}<div class="logs-sub">{{ r.duration_ms }} ms</div>{% endif %}
+              </td>
+            {% endif %}
+            {% if tab == 'edited' %}
+              <td>
+                {% if r.changes %}
+                  <table class="logs-diff">
+                    <thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead>
+                    <tbody>
+                      {% for c in r.changes[:8] %}
+                      <tr>
+                        <td class="field">{{ c.field }}</td>
+                        <td class="old">{{ c.before if c.before != '' else '(empty)' }}</td>
+                        <td class="new">{{ c.after if c.after != '' else '(empty)' }}</td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                  {% if r.changes|length > 8 %}
+                    <div class="logs-sub">+{{ r.changes|length - 8 }} more field(s) — open the row for the full payload</div>
+                  {% endif %}
+                {% else %}
+                  <span class="logs-sub">No field diff stored for this row.</span>
+                {% endif %}
+              </td>
+            {% endif %}
+          {% endif %}
+
+          <td>
+            {% if r.request_id or r.before_json or r.after_json or r.changed_json %}
+            <details class="logs-expand">
+              <summary>Details</summary>
+              <div class="mt-2" style="min-width:320px;">
+                <div class="logs-sub mb-1">
+                  {% if r.request_id %}request <code class="logs-chip">{{ r.request_id }}</code>{% endif %}
+                  {% if r.session_sid %} · session <code class="logs-chip">{{ r.session_sid[:10] }}…</code>{% endif %}
+                  {% if r.status_code %} · HTTP {{ r.status_code }}{% endif %}
+                </div>
+                {% if r.before_json %}
+                  <div class="logs-sub fw-bold mt-2">Before</div>
+                  <pre class="logs-json">{{ r.before_json | prettyjson }}</pre>
+                {% endif %}
+                {% if r.after_json %}
+                  <div class="logs-sub fw-bold mt-2">After</div>
+                  <pre class="logs-json">{{ r.after_json | prettyjson }}</pre>
+                {% endif %}
+                {% if r.changed_json and tab != 'edited' %}
+                  <div class="logs-sub fw-bold mt-2">Changed fields</div>
+                  <pre class="logs-json">{{ r.changed_json | prettyjson }}</pre>
+                {% endif %}
+              </div>
+            </details>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="9">
+            <div class="logs-empty">
+              <i class="bi bi-inbox"></i>
+              <div class="t">Nothing recorded for this tab yet</div>
+              <div class="h">
+                {% if not coverage.has_data %}
+                  Activity capture is on but no events have been written yet. Do one of the things this tab
+                  tracks (e.g. save an entry, sign in) and reload — the row appears immediately. Nothing here is
+                  simulated.
+                {% elif filters.is_active() %}
+                  No rows match <strong>{{ filters.describe() }}</strong>. Widen the period or clear the filters.
+                {% else %}
+                  There are events in the log, but none of this type in {{ filters.range_label|lower }}.
+                {% endif %}
+              </div>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% include 'logs/_pager.html' %}
+</div>
+
+{% if tab == 'views' %}
+  {% include 'logs/_views_summary.html' %}
+{% endif %}

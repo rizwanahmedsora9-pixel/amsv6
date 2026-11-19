@@ -1,0 +1,505 @@
+"""grn — split from ops.py."""
+from ._common import *  # noqa
+from app.services.grn_costing import charge_billed_to_supplier
+from app.services.grn_consumption import grn_consumption_for_page
+from app.services.grn_costing import prime_grn_lines
+from app.services.grn_costs import (
+    build_grn_costs, grn_cost_supplier_options, normalize_kind,
+    COST_KIND_LABELS, KIND_ORDER,
+)
+from app.services.void_rebuild import hard_delete_transaction
+
+
+class _LegacyChargeFormShim:
+    """Expose retired flat cost fields as charge-grid rows.
+
+    ``loading_cost`` / ``freight_cost`` / ``other_expense`` are still posted by
+    older screens and by CSV imports, but only ``grn_charge`` rows reach the
+    landed cost.  Silently dropping them understated purchase cost, so they are
+    translated into INVENTORY charge lines before the grid is synced -- one
+    mechanism, one truth.
+    """
+
+    _MAP = (
+        ('loading_cost', 'LOADING', 'Loading (legacy field)'),
+        ('freight_cost', 'TRANSPORT', 'Freight (legacy field)'),
+        ('other_expense', 'OTHER', 'Other purchase expense (legacy field)'),
+    )
+
+    def __init__(self, form, legacy_amounts):
+        self._form = form
+        self._legacy = {k: float(v or 0) for k, v in (legacy_amounts or {}).items()}
+        self.translated = []
+
+    def _rows(self):
+        rows = []
+        for field, ctype, label in self._MAP:
+            amount = self._legacy.get(field, 0.0)
+            if amount > 0:
+                rows.append((ctype, label, f"{amount:.2f}"))
+        return rows
+
+    def getlist(self, key):
+        existing = self._form.getlist(key)
+        if existing:
+            return existing
+        rows = self._rows()
+        if not rows:
+            return existing
+        if key == 'charge_type[]':
+            return [r[0] for r in rows]
+        if key == 'charge_label[]':
+            return [r[1] for r in rows]
+        if key == 'charge_amount[]':
+            self.translated = [r[1] for r in rows]
+            return [r[2] for r in rows]
+        if key == 'charge_treatment[]':
+            return ['INVENTORY'] * len(rows)
+        if key == 'charge_basis[]':
+            return ['VALUE'] * len(rows)
+        if key == 'charge_recipient_type[]':
+            return ['SELF'] * len(rows)
+        if key == 'charge_row_key[]':
+            return [f'legacy-{r[0].lower()}-{i}' for i, r in enumerate(rows)]
+        return existing
+
+    def get(self, key, default=None):
+        return self._form.get(key, default)
+
+    def __contains__(self, key):
+        return key in self._form
+
+    def __getattr__(self, item):
+        return getattr(self._form, item)
+
+
+def _parse_grn_money(raw, field_label):
+    """Parse a GRN money/qty field without crashing on user input.
+
+    Accepts '', None, plain numbers and numbers typed with thousands
+    separators ('1,500').  Anything else raises ValueError with a field
+    name so the route can flash a readable message instead of returning
+    HTTP 500 (or silently saving 0).
+    """
+    if raw is None:
+        return 0.0
+    text = str(raw).strip()
+    if not text:
+        return 0.0
+    cleaned = text.replace(',', '').replace(' ', '')
+    try:
+        return float(cleaned)
+    except ValueError:
+        raise ValueError(f"'{field_label}' has an invalid number: '{text}'. Use digits only, e.g. 1500.")
+
+@bp.route('/grn', methods=['GET', 'POST'])
+@login_required
+def grn():
+    if request.method == 'POST':
+        action = request.form.get('action')
+
+        if action == 'add':
+            _t0 = time.time()
+            logger = logging.getLogger('grn')
+            _actor = getattr(current_user, 'username', None) or 'anon'
+            logger.info('GRN_CREATE_START action=add user=%s', _actor)
+            supplier_input = request.form.get('supplier', '').strip()
+            supplier_id = request.form.get('supplier_id')
+            
+            supplier_obj = None
+            if supplier_id:
+                supplier_obj = db.session.get(Supplier, int(supplier_id))
+            elif supplier_input:
+                supplier_obj = get_supplier_by_input(supplier_input)
+                if not supplier_obj:
+                    # Auto-create supplier if not found
+                    supplier_obj = Supplier(name=supplier_input, is_active=True)
+                    db.session.add(supplier_obj)
+                    db.session.flush()
+            
+            supplier_name = supplier_obj.name if supplier_obj else supplier_input
+
+            manual_bill_raw = request.form.get('manual_bill_no', '').strip()
+            manual_bill = normalize_manual_bill(manual_bill_raw) if manual_bill_raw else ''
+            auto_bill = get_next_bill_no(AUTO_BILL_NAMESPACES['GRN'])
+            note = request.form.get('note', '').strip()
+            photo = save_photo(request.files.get('photo'))
+            photo_url = request.form.get('photo_url', '').strip()
+            try:
+                loading_cost = _parse_grn_money(request.form.get('loading_cost', 0), 'Load Expense')
+                freight_cost = _parse_grn_money(request.form.get('freight_cost', 0), 'Freight Expense')
+                other_expense = _parse_grn_money(request.form.get('other_expense', 0), 'Other Expense')
+                adjustment_amount = _parse_grn_money(request.form.get('adjustment_amount', 0), 'Adjustment Amount')
+            except ValueError as ve:
+                flash(str(ve), 'danger')
+                return redirect(url_for('grn'))
+            try:
+                discount, _ = _parse_discount_fields(
+                    request.form.get('discount', 0),
+                    '',
+                    label='GRN discount',
+                    require_reason=False
+                )
+            except ValueError as ve:
+                flash(str(ve), 'danger')
+                return redirect(url_for('grn'))
+            try:
+                tax_percent = _parse_grn_money(request.form.get('tax_percent', 0), 'Purchase Tax %')
+                tax_amount = _parse_grn_money(request.form.get('tax_amount', 0), 'Purchase Tax Amount')
+            except ValueError as ve:
+                flash(str(ve), 'danger')
+                return redirect(url_for('grn'))
+            # Owner rule A1: a GRN NEVER pays.  No payment amount, method,
+            # account or bank detail is accepted on a receive document.  All
+            # payments are posted from Accounts -> Pay GRN Expenses.
+            paid_amount = 0.0
+            payment_type = 'Credit'
+            payment_account_id = None
+            bank_name = account_name = account_no = ''
+            tax_type = request.form.get('tax_type', '').strip()
+            supplier_invoice_no = request.form.get('supplier_invoice_no', '').strip()
+            due_date_str = request.form.get('due_date')
+            bill_date_str = request.form.get('bill_date')
+
+            # Manual date / time override (step 1 of the wizard).  Adding and
+            # editing share the same parser so an entry typed by hand is saved
+            # exactly as typed; an unreadable value is refused with a message
+            # instead of silently stamping the GRN with the server clock.
+            try:
+                date_posted = parse_grn_datetime(
+                    request.form.get('date'),
+                    request.form.get('time'),
+                )
+            except ValueError as ve:
+                flash(str(ve), 'danger')
+                return redirect(url_for('grn'))
+
+            restricted = _enforce_grn_backdate_policy(date_posted, 'Add GRN')
+            if restricted:
+                return restricted
+            
+            due_date = None
+            if due_date_str:
+                try: due_date = datetime.strptime(due_date_str, '%Y-%m-%d').date()
+                except: pass
+                
+            bill_date = None
+            if bill_date_str:
+                try: bill_date = datetime.strptime(bill_date_str, '%Y-%m-%d').date()
+                except: pass
+
+            if manual_bill:
+                conflict = find_bill_conflict(manual_bill)
+                if conflict:
+                    flash(f"Manual bill '{manual_bill}' already exists in {conflict[0]} #{conflict[1]}.", 'danger')
+                    return redirect(url_for('grn'))
+
+            # No payment validation on a receiving document (A1).
+
+            new_grn = GRN(
+                supplier=supplier_name, 
+                supplier_id=supplier_obj.id if supplier_obj else None,
+                manual_bill_no=manual_bill,
+                auto_bill_no=auto_bill, 
+                photo_path=photo, 
+                photo_url=photo_url, 
+                note=note,
+                loading_cost=loading_cost,
+                freight_cost=freight_cost,
+                other_expense=other_expense,
+                adjustment_amount=adjustment_amount,
+                discount=discount,
+                paid_amount=0,
+                payment_type=payment_type,
+                payment_account_id=None,
+                bank_name=bank_name,
+                account_name=account_name,
+                account_no=account_no,
+                tax_percent=tax_percent,
+                tax_amount=tax_amount,
+                tax_type=tax_type,
+                supplier_invoice_no=supplier_invoice_no,
+                due_date=due_date,
+                bill_date=bill_date,
+                date_posted=date_posted,
+                costing_mode='LANDED',
+                allocation_basis_default=(request.form.get('allocation_basis_default') or 'VALUE').strip().upper(),
+                created_by=current_user.username,
+            )
+            db.session.add(new_grn)
+            db.session.flush()
+
+            # Charge lines / payment obligations (A1: no money is paid here).
+            charge_form = _LegacyChargeFormShim(request.form, {
+                'loading_cost': loading_cost,
+                'freight_cost': freight_cost,
+                'other_expense': other_expense,
+            })
+            try:
+                sync_charges_from_form(new_grn, charge_form, actor=current_user.username)
+            except ValueError as ve:
+                db.session.rollback()
+                flash(str(ve), 'danger')
+                return redirect(url_for('grn'))
+            mirror_legacy_charge_columns(new_grn)
+
+            mat_names = request.form.getlist('mat_name[]')
+            qtys = request.form.getlist('qty[]')
+            prices = request.form.getlist('price[]')
+
+            item_array_lengths = (len(mat_names), len(qtys), len(prices))
+            if len(set(item_array_lengths)) > 1:
+                logger.warning(
+                    'GRN_ITEM_ARRAY_LENGTH_MISMATCH names=%d quantities=%d prices=%d user=%s',
+                    *item_array_lengths, _actor,
+                )
+
+            skipped_lines = []
+            saved_item_count = 0
+            # Do not use zip() here: it silently stops at the shortest posted
+            # list, which can drop otherwise valid GRN lines when a browser or
+            # older form omits an optional value for one row.  Keep every row
+            # and default a missing optional value (rate) to zero.
+            for name, qty, price in zip_longest(mat_names, qtys, prices, fillvalue=''):
+                if not name:
+                    continue
+                try:
+                    qty_val = float(qty or 0)
+                except (TypeError, ValueError):
+                    qty_val = 0.0
+                # Server-side inventory guard: zero/negative received
+                # quantities must never create a stock movement (mirrors the
+                # direct-sale rule qty <= 0 => skip).
+                if qty_val <= 0:
+                    logger.warning(
+                        'GRN_ITEM_SKIPPED_INVALID_QTY mat=%s qty=%r user=%s',
+                        name, qty, _actor,
+                    )
+                    skipped_lines.append(f"{name} (qty={qty or 0})")
+                    continue
+                if is_service_name(name) or get_service_by_input(name):
+                    db.session.rollback()
+                    flash(f'"{name}" is a service/charge and cannot be received on a GRN.', 'danger')
+                    return redirect(url_for('grn'))
+                price_val = float(price) if price else 0
+                item = GRNItem(grn_id=new_grn.id, mat_name=name, qty=qty_val, price_at_time=price_val)
+                db.session.add(item)
+
+                mat = Material.query.filter_by(name=name).first()
+                if mat:
+                    mat.total += qty_val
+
+                entry = Entry(
+                    date=date_posted.strftime('%Y-%m-%d'),
+                    time=date_posted.strftime('%H:%M:%S'),
+                    type='IN',
+                    material=name,
+                    client=supplier_name,
+                    qty=qty_val,
+                    bill_no=manual_bill or '',
+                    auto_bill_no=auto_bill,
+                    created_by=current_user.username,
+                    note=note,
+                    # Traceability: every stock movement names the document that
+                    # created it, exactly as sales/returns already do.  Without
+                    # this a received lot cannot be traced back from the ledger.
+                    source_module='GRN',
+                    source_table='grn',
+                    source_id=new_grn.id,
+                )
+                db.session.add(entry)
+                saved_item_count += 1
+
+            # Landed costs are computed from the received lots + capitalised
+            # charges.  Paid/unpaid status never affects the rate (owner rule).
+            recompute_landed_costs(new_grn, actor=current_user.username)
+            # Legacy auto-payment sync is a no-op for LANDED GRNs (A1).
+            _sync_grn_auto_supplier_payment(new_grn)
+
+            try:
+                db.session.commit()
+            except IntegrityError as _dup:
+                # DB-level duplicate-submission guard (uq_grn_manual_bill_no):
+                # the same manual bill posted twice (double click / retry /
+                # refresh) must not create a second GRN or stock movement.
+                db.session.rollback()
+                logger.warning(
+                    'GRN_DUPLICATE_REJECTED manual_bill=%s user=%s elapsed_ms=%.1f',
+                    manual_bill, _actor, (time.time() - _t0) * 1000.0,
+                )
+                flash('GRN not saved: this bill number was already received (duplicate submission ignored).', 'danger')
+                return redirect(url_for('grn'))
+            logger.info(
+                'GRN_COMMIT id=%s bill=%s items=%d elapsed_ms=%.1f',
+                new_grn.id, auto_bill, saved_item_count, (time.time() - _t0) * 1000.0,
+            )
+            if skipped_lines:
+                flash(
+                    'GRN saved, but these item lines were NOT saved because quantity was 0 or negative: '
+                    + '; '.join(skipped_lines),
+                    'warning'
+                )
+            _charge_count = len([c for c in (new_grn.charges or []) if not c.is_void])
+            if _charge_count:
+                flash(
+                    f'GRN added successfully with {_charge_count} charge line(s) '
+                    f'capitalised into the landed cost.',
+                    'success'
+                )
+            else:
+                flash('GRN added successfully!', 'success')
+
+        elif action == 'delete':
+            grn_id = request.form.get('id')
+            grn_obj = db.session.get(GRN, grn_id)
+            if grn_obj:
+                restricted = _enforce_grn_backdate_policy(grn_obj.date_posted, 'Delete GRN', entity_id=grn_obj.id)
+                if restricted:
+                    return restricted
+                # Immediate delete: stock is reversed and the GRN and everything
+                # it owns are removed for real.  Refused when its lots are
+                # locked by sales or when Accounts payments reference it.
+                try:
+                    ok = hard_delete_transaction('GRN', grn_obj.id)
+                    if ok:
+                        db.session.commit()
+                        flash('GRN deleted. Stock and linked records reversed immediately.', 'success')
+                    else:
+                        flash('GRN not found.', 'warning')
+                except ValueError as ve:
+                    db.session.rollback()
+                    flash(str(ve), 'danger')
+                except Exception as exc:
+                    db.session.rollback()
+                    logging.exception('GRN delete failed')
+                    flash(f'Unable to delete GRN: {exc or "the GRN could not be deleted. Please try again."}', 'danger')
+
+        return redirect(url_for('grn'))
+
+    search = request.args.get('search', '').strip()
+    sort_by = request.args.get('sort', 'date')
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    # Records (default) | Costs — the Costs tab lists every individual purchase
+    # cost (stock / vehicle fare / loading / unloading / other) with its own
+    # supplier and date filters.  Read-only; payments stay in Accounts.
+    active_tab = 'costs' if (request.args.get('tab') or '').strip().lower() == 'costs' else 'records'
+
+    query = GRN.query
+    if search:
+        query = query.filter(or_(
+            GRN.supplier.ilike(f'%{search}%'),
+            GRN.manual_bill_no.ilike(f'%{search}%'),
+            GRN.auto_bill_no.ilike(f'%{search}%')
+        ))
+    if start_date:
+        query = query.filter(func.date(GRN.date_posted) >= start_date)
+    if end_date:
+        query = query.filter(func.date(GRN.date_posted) <= end_date)
+    
+    page = max(1, request.args.get('page', 1, type=int) or 1)
+    per_page = request.args.get('per_page', 50, type=int) or 50
+    if per_page not in (25, 50, 100):
+        per_page = 50
+
+    if sort_by == 'supplier':
+        ordered_q = query.options(selectinload(GRN.items)).order_by(
+            GRN.supplier.asc(),
+            GRN.entry_seq.desc(),
+            GRN.date_posted.desc(),
+            GRN.id.desc()
+        )
+    else:
+        # entry_seq is permanent: editing a GRN cannot reorder the list.
+        ordered_q = query.options(selectinload(GRN.items)).order_by(
+            GRN.entry_seq.desc(),
+            GRN.date_posted.desc(),
+            GRN.id.desc()
+        )
+
+    grn_pagination = ordered_q.paginate(page=page, per_page=per_page, error_out=False)
+    if grn_pagination.pages and page > grn_pagination.pages:
+        page = grn_pagination.pages
+        grn_pagination = ordered_q.paginate(page=page, per_page=per_page, error_out=False)
+    grns = grn_pagination.items
+
+    materials = [
+        m for m in Material.query.filter_by(is_active=True).order_by(Material.name.asc()).all()
+        if not is_service_name(m.name)
+    ]
+    clients = Client.query.filter_by(is_active=True).order_by(Client.name.asc()).all()
+    suppliers_list = Supplier.query.filter_by(is_active=True).order_by(Supplier.name.asc()).all()
+
+    settings = Settings.query.first()
+    next_auto = peek_next_bill_no(AUTO_BILL_NAMESPACES['GRN'])
+
+    accounts = Account.query.filter(
+        func.coalesce(Account.is_active, True) == True,
+        func.lower(func.trim(Account.category)).in_(['cash', 'bank']),
+    ).order_by(Account.category.asc(), Account.name.asc()).all()
+
+    # Per-lot consumption for the indicator: derived read-only from GRNAllocation
+    # plus the FIFO movement replay (see app/services/grn_consumption.py).
+    try:
+        grn_consumption = grn_consumption_for_page(grns)
+    except Exception:
+        logging.getLogger('grn').exception('GRN consumption projection failed')
+        grn_consumption = None
+
+    try:
+        # One bulk load for the listed GRNs' lines/charges/payments: each
+        # ``grn_breakdown`` asks for them, and per-GRN queries made this page
+        # 4,000+ statements on a shop-sized database.
+        prime_grn_lines(grns)
+        grn_breakdowns = {g.id: grn_breakdown(g) for g in grns}
+    except Exception:
+        logging.getLogger('grn').exception('GRN cost breakdown failed')
+        grn_breakdowns = {}
+
+    # GRN Costs tab: every individual cost line, filtered by kind / supplier /
+    # date.  Built from the same grn_breakdown projection as the records table.
+    grn_costs = None
+    if active_tab == 'costs':
+        try:
+            grn_costs = build_grn_costs(
+                start=request.args.get('cost_start') or None,
+                end=request.args.get('cost_end') or None,
+                supplier=request.args.get('cost_supplier') or '',
+                kind=normalize_kind(request.args.get('cost_kind')),
+            )
+        except Exception:
+            logging.getLogger('grn').exception('GRN costs projection failed')
+            grn_costs = None
+
+    return render_template(
+        'grn_wizard.html',
+        grns=grns,
+        grn_pagination=grn_pagination,
+        page=page,
+        per_page=per_page,
+        grn_breakdowns=grn_breakdowns,
+        charge_billed_to_supplier=charge_billed_to_supplier,
+        grn_consumption=grn_consumption,
+        materials=materials,
+        settings=settings,
+        next_auto=next_auto,
+        clients=clients,
+        suppliers=suppliers_list,
+        accounts=accounts,
+        grn_parties=CashFlowParty.query.filter(
+            func.coalesce(CashFlowParty.is_active, True) == True
+        ).order_by(CashFlowParty.name.asc()).limit(500).all(),
+        today_date=pk_today().strftime('%Y-%m-%d'),
+        now_time=pk_now().strftime('%H:%M'),
+        search=search,
+        sort=sort_by,
+        start_date=start_date,
+        end_date=end_date,
+        active_tab=active_tab,
+        grn_costs=grn_costs,
+        cost_suppliers=grn_cost_supplier_options(),
+        cost_kind_labels=COST_KIND_LABELS,
+        cost_kind_order=KIND_ORDER,
+    )
+
+

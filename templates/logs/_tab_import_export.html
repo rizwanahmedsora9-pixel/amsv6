@@ -1,0 +1,92 @@
+{# Import / Export tab — real ImportUpload / ImportJob rows plus the
+   activity events written by the import and export routes. #}
+
+<div class="row g-3 mb-3">
+  <div class="col-6 col-lg-3"><div class="logs-stat"><span class="k">Import rows (newest 100)</span><span class="v">{{ import_jobs|length }}</span></div></div>
+  <div class="col-6 col-lg-3"><div class="logs-stat"><span class="k">Completed</span><span class="v">{{ import_jobs|selectattr('status','equalto','completed')|list|length }}</span></div></div>
+  <div class="col-6 col-lg-3"><div class="logs-stat"><span class="k">Failed</span><span class="v">{{ import_jobs|selectattr('status','equalto','failed')|list|length }}</span></div></div>
+  <div class="col-6 col-lg-3"><div class="logs-stat"><span class="k">Rows in this filter</span><span class="v">{{ pager.total }}</span></div></div>
+</div>
+
+<div class="ui-card mb-3">
+  <div class="ui-card-header">
+    <h5><i class="bi bi-file-earmark-arrow-up"></i> Import jobs — file, rows and outcome</h5>
+    <span class="logs-count">Source: <code>import_job</code> / <code>import_upload</code></span>
+  </div>
+  <div class="ui-table-wrap">
+    <table class="ui-table">
+      <thead>
+        <tr>
+          <th>Started</th>
+          <th>File</th>
+          <th>Status</th>
+          <th class="num">Rows</th>
+          <th class="num">Processed</th>
+          <th>Sheet / row</th>
+          <th>Error</th>
+          <th>Finished</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for j in import_jobs %}
+        {% set up = import_uploads.get(j.upload_id) %}
+        <tr>
+          <td class="logs-when">{{ j.started_at.strftime('%Y-%m-%d %H:%M:%S') if j.started_at else (j.created_at.strftime('%Y-%m-%d %H:%M:%S') if j.created_at else '—') }}</td>
+          <td>
+            <div class="logs-summary">{{ up.filename if up else '(upload missing)' }}</div>
+            {% if up %}<div class="logs-sub">{{ up.size_bytes | filesize }} · {{ up.uploaded_at.strftime('%Y-%m-%d %H:%M') if up.uploaded_at else '' }}</div>{% endif %}
+          </td>
+          <td>
+            <span class="logs-pill {% if j.status == 'completed' %}success{% elif j.status == 'failed' %}failed{% else %}blocked{% endif %}">{{ j.status }}</span>
+          </td>
+          <td class="num">{{ '{:,}'.format(j.total_rows or 0) }}</td>
+          <td class="num">{{ '{:,}'.format(j.processed_rows or 0) }}</td>
+          <td class="logs-sub">{{ j.current_sheet or '—' }}{% if j.current_row %} · row {{ j.current_row }}{% endif %}</td>
+          <td class="logs-sub">{% if j.error_message %}<span class="text-danger">{{ j.error_message[:120] }}</span>{% else %}—{% endif %}</td>
+          <td class="logs-when">{{ j.finished_at.strftime('%Y-%m-%d %H:%M:%S') if j.finished_at else '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8">
+          <div class="logs-empty"><i class="bi bi-inbox"></i>
+            <div class="t">No import jobs recorded</div>
+            <div class="h">Excel imports create a row in <code>import_job</code> when they start, so this table fills the first time you run one.</div>
+          </div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="ui-card">
+  <div class="ui-card-header">
+    <h5><i class="bi bi-arrow-left-right"></i> Import / export activity events</h5>
+    <span class="logs-count">{{ filters.describe() }}</span>
+  </div>
+  <div class="ui-table-wrap">
+    <table class="ui-table">
+      <thead>
+        <tr><th style="width:150px;">When</th><th>What happened</th><th>By</th><th>Where</th><th>Result</th></tr>
+      </thead>
+      <tbody>
+        {% for r in pager.rows %}
+        <tr>
+          <td class="logs-when">{{ r.occurred_at.strftime('%Y-%m-%d %H:%M:%S') }}<span class="logs-age">{{ r.occurred_at | age }}</span></td>
+          <td><div class="logs-summary">{{ r.summary or r.action }}</div><div class="logs-sub">{{ r.entity_label or '' }}</div></td>
+          <td>{{ r.username or '—' }}</td>
+          <td class="logs-sub"><code class="logs-chip">{{ r.path or '—' }}</code></td>
+          <td><span class="logs-pill {{ r.result }}">{{ r.result }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5">
+          <div class="logs-empty"><i class="bi bi-arrow-left-right"></i>
+            <div class="t">No import/export activity in this period</div>
+            <div class="h">Finished imports and exports of the database are recorded here automatically. An export started before this build has no row — it is not invented.</div>
+          </div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include 'logs/_pager.html' %}
+</div>

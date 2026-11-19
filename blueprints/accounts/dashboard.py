@@ -1,0 +1,214 @@
+"""dashboard — split from accounts.py."""
+from ._common import *  # noqa
+
+from uuid import uuid4
+
+def _grn_expenses_open_total(bill):
+    """Every open GRN expense (each one is its own payable box)."""
+    total = bill.get('recipient_remaining', 0.0) or 0.0
+    for charge in bill.get('charged_to_supplier') or []:
+        if not charge.get('included_in_supplier_bill'):
+            continue
+        total += charge.get('remaining', 0.0) or 0.0
+    return round(total, 2)
+
+
+@accounts_bp.route('/')
+@login_required
+def dashboard():
+    """Accounts dashboard with KPI cards and financial overview."""
+    _ensure_default_account_categories()
+    _backfill_legacy_account_groups()
+    today = pk_today()
+    
+    # Calculate KPIs
+    # Total ledger payments from clients today (Payment table).
+    client_payments_today = db.session.query(func.sum(Payment.amount)).filter(
+        Payment.date_posted >= today,
+        Payment.date_posted < today + timedelta(days=1),
+        Payment.is_void == False,
+        Payment.payment_account_id.isnot(None),
+        Payment.amount > 0
+    ).scalar() or 0
+    
+    # SupplierPayment is the canonical payment row for new GRNs.  Add only
+    # legacy GRN payments that do not have the marked auto-payment row, or
+    # the dashboard counts every GRN payment twice.
+    supplier_payments_core_today = db.session.query(func.sum(SupplierPayment.amount)).filter(
+        SupplierPayment.date_posted >= today,
+        SupplierPayment.date_posted < today + timedelta(days=1),
+        SupplierPayment.is_void == False
+    ).scalar() or 0
+    legacy_grns_today = GRN.query.filter(
+        GRN.date_posted >= today,
+        GRN.date_posted < today + timedelta(days=1),
+        GRN.is_void == False,
+        GRN.paid_amount > 0
+    ).all()
+    grn_supplier_paid_today = _legacy_unrepresented_grn_paid_total(legacy_grns_today)
+
+    supplier_payments_today = float(supplier_payments_core_today or 0) + float(grn_supplier_paid_today or 0)
+    
+    # Total expenditures today
+    drawer_expenditures_today = db.session.query(func.sum(FbmCashDrawerEntry.amount)).filter(
+        FbmCashDrawerEntry.date_posted >= today,
+        FbmCashDrawerEntry.date_posted < today + timedelta(days=1),
+        FbmCashDrawerEntry.entry_type == 'out',
+        FbmCashDrawerEntry.is_void == False
+    ).scalar() or 0
+    # Keep the headline KPI consistent with its drill-down: Accounts expenses,
+    # direct payments and driver payments are expenditures too, not only the
+    # legacy FBM cash-drawer rows.
+    account_expenditures_today = db.session.query(func.sum(AccountTransaction.amount)).filter(
+        AccountTransaction.date_posted >= today,
+        AccountTransaction.date_posted < today + timedelta(days=1),
+        AccountTransaction.is_void == False,
+        AccountTransaction.transaction_type.in_(['Expense', 'Payment', 'Driver Payment']),
+        func.lower(func.coalesce(AccountTransaction.source_type, '')) != 'loanprincipal',
+        AccountTransaction.from_account_id.isnot(None),
+    ).scalar() or 0
+    expenditures_today = float(drawer_expenditures_today or 0) + float(account_expenditures_today or 0)
+    
+    # Total receipts today (paid amounts only): bookings + direct sales.
+    booking_paid_today = db.session.query(func.sum(Booking.paid_amount)).filter(
+        Booking.date_posted >= today,
+        Booking.date_posted < today + timedelta(days=1),
+        Booking.is_void == False,
+        Booking.paid_amount > 0
+    ).scalar() or 0
+
+    sales_paid_today = db.session.query(func.sum(DirectSale.paid_amount)).filter(
+        DirectSale.date_posted >= today,
+        DirectSale.date_posted < today + timedelta(days=1),
+        DirectSale.is_void == False
+    ).scalar() or 0
+
+    tx_receipts_today = db.session.query(func.sum(AccountTransaction.amount)).filter(
+        AccountTransaction.date_posted >= today,
+        AccountTransaction.date_posted < today + timedelta(days=1),
+        AccountTransaction.is_void == False,
+        AccountTransaction.transaction_type == 'Receipt',
+        func.lower(func.coalesce(AccountTransaction.source_type, '')) != 'loanprincipal',
+        AccountTransaction.to_account_id.isnot(None),
+        # Booking/direct-sale/payment source rows are already represented by
+        # their source document totals above.  Only standalone receipts belong
+        # in this additional bucket.
+        or_(
+            AccountTransaction.note.is_(None),
+            ~AccountTransaction.note.ilike('%[SRC:%')
+        )
+    ).scalar() or 0
+
+    receipts_today = float(booking_paid_today or 0) + float(sales_paid_today or 0) + float(client_payments_today or 0) + float(tx_receipts_today or 0)
+    
+    # Account balances + due clients + company liquidity KPI
+    accounts = _active_accounts().order_by(Account.name.asc()).all()
+    from app.services.payments_crud import ledger_balance, ledger_balances_bulk
+    today_date = pk_today()
+    opening_cutoff = datetime.combine(today_date, datetime.min.time()) - timedelta(microseconds=1)
+    # One grouped aggregate for every account's all-time totals (the old code
+    # walked the whole ledger twice per account), then only the accounts that
+    # actually need an as-of-date figure pay for a second query.  Both numbers
+    # come from the same ledger_balance() arithmetic, so nothing on screen moves.
+    try:
+        bulk_balances = ledger_balances_bulk([account.id for account in accounts])
+    except Exception:
+        bulk_balances = {}
+    for account in accounts:
+        if account.id in bulk_balances:
+            account.calculated_balance = bulk_balances[account.id]
+        account.today_opening_balance = ledger_balance(account.id, as_of=opening_cutoff)
+    
+    due_clients = _client_due_summary()
+    supplier_payables = _supplier_payable_summary()
+    company_accounts = _company_accounts()
+    account_categories = _account_categories()
+    total_company_money = sum(float(a.balance or 0) for a in company_accounts)
+    total_cash_money = sum(float(a.balance or 0) for a in company_accounts if (a.category or '').lower() == 'cash')
+    receive_source_accounts = [{
+        'id': a.id,
+        'name': a.name,
+        'source_category': (a.source_category or '').strip()
+    } for a in accounts if (a.source_category or '').strip()]
+    
+    suppliers = Supplier.query.filter_by(is_active=True).order_by(Supplier.name.asc()).all()
+    clients = Client.query.filter_by(is_active=True).order_by(Client.name.asc()).all()
+    # Drivers are payables like suppliers: the Accounts section can pay them
+    # directly, and the resulting transaction appears in the driver ledger.
+    from app.services.driver_payments import driver_outstanding
+    delivery_persons = DeliveryPerson.query.filter_by(is_active=True).order_by(DeliveryPerson.name.asc()).all()
+    driver_outstanding_map = {}
+    for person in delivery_persons:
+        try:
+            driver_outstanding_map[person.id] = driver_outstanding(person.id)
+        except Exception:
+            driver_outstanding_map[person.id] = 0.0
+    # The modal's "Pay GRN Expenses" picker must expose the date and the REAL
+    # amount still payable.  Every GRN expense is its own payable (one money
+    # field each), so the recipient-expense figure is every open expense —
+    # ticked or not — and the supplier figure is only what the supplier is
+    # still owed (stock + expenses not paid through their recipient).
+    from app.services.grn_costing import prime_grn_lines, supplier_bill_breakdown
+    grn_payment_options = []
+    recent_grns = (GRN.query.filter(GRN.is_void == False, GRN.is_cancelled == False)
+                            .order_by(GRN.date_posted.desc(), GRN.id.desc()).limit(200).all())
+    prime_grn_lines(recent_grns)
+    for g in recent_grns:
+        try:
+            bill = supplier_bill_breakdown(g)
+        except Exception:
+            continue
+        date_label = g.date_posted.strftime('%d/%b/%Y') if g.date_posted else 'Date not recorded'
+        grn_payment_options.append({
+            'id': g.id,
+            'label': f"{bill['bill_ref']} · {bill['supplier'] or 'Supplier not recorded'} · {date_label}",
+            'bill_ref': bill['bill_ref'],
+            'supplier': bill['supplier'] or '',
+            'date_label': date_label,
+            'date_iso': g.date_posted.strftime('%Y-%m-%d') if g.date_posted else '',
+            'total_due': bill['total_remaining'],
+            'supplier_ledger_due': bill['material_remaining'] + bill['expenses_remaining'],
+            'recipient_expenses_due': _grn_expenses_open_total(bill),
+        })
+    # Expense classification is mastered only in Cash Flow.  The Accounts form
+    # reads the same rows; no parallel Accounts category/party registry exists.
+    expense_categories = CashFlowCategory.query.filter(
+        CashFlowCategory.is_active == True,
+        func.lower(func.coalesce(CashFlowCategory.direction, 'both')).in_(['out', 'both']),
+    ).order_by(CashFlowCategory.sort_order.asc(), CashFlowCategory.name.asc(), CashFlowCategory.id.asc()).all()
+    expense_subcategories = CashFlowSubcategory.query.join(
+        CashFlowCategory, CashFlowSubcategory.category_id == CashFlowCategory.id
+    ).filter(
+        CashFlowSubcategory.is_active == True,
+        CashFlowCategory.is_active == True,
+        func.lower(func.coalesce(CashFlowCategory.direction, 'both')).in_(['out', 'both']),
+    ).order_by(CashFlowSubcategory.name.asc(), CashFlowSubcategory.id.asc()).all()
+    expense_parties = CashFlowParty.query.filter(
+        CashFlowParty.is_active == True,
+    ).order_by(CashFlowParty.name.asc(), CashFlowParty.id.asc()).all()
+
+    return render_template('accounts/dashboard.html',
+                          expense_categories=expense_categories,
+                          expense_subcategories=expense_subcategories,
+                          expense_parties=expense_parties,
+                          grn_payment_options=grn_payment_options,
+                          client_payments_today=client_payments_today,
+                          supplier_payments_today=supplier_payments_today,
+                          expenditures_today=expenditures_today,
+                          receipts_today=receipts_today,
+                         accounts=accounts,
+                         due_clients=due_clients,
+                         supplier_payables=supplier_payables,
+                         company_accounts=company_accounts,
+                          account_categories=account_categories,
+                          receive_source_accounts=receive_source_accounts,
+                          total_company_money=total_company_money,
+                          total_cash_money=total_cash_money,
+                          suppliers=suppliers,
+                          clients=clients,
+                          delivery_persons=delivery_persons,
+                          driver_outstanding=driver_outstanding_map,
+                          submission_token=uuid4().hex,
+                          default_tx_datetime=pk_now().strftime('%Y-%m-%dT%H:%M'))
+
+

@@ -1,0 +1,147 @@
+{# Server logs tab — reads the rotating files in instance/logs/.
+   Files are read from the end in 64 KB chunks (app/services/system_logs.py),
+   so a huge log cannot exhaust memory. Nothing is fabricated: if a file does
+   not exist, this page says so. #}
+
+<div class="ui-card mb-3">
+  <div class="ui-card-header">
+    <h5><i class="bi bi-folder2-open"></i> Log files on disk</h5>
+    <span class="logs-count">instance/logs/</span>
+  </div>
+  <div class="ui-card-body">
+    <div class="row g-2">
+      {% for f in files %}
+      <div class="col-md-6 col-xl-4">
+        <a class="ui-quick w-100 {% if f.name == filename %}border-warning{% endif %}"
+           href="{{ url_for('system.logs_page', tab='server', file=f.name, limit=limit, level=level, contains=contains) }}">
+          <i class="bi bi-file-earmark-text"></i>
+          <span class="flex-grow-1">
+            <span class="d-block">{{ f.name }}</span>
+            <span class="logs-sub">{{ f.label }} · {{ f.size_human }} · {{ f.modified }}</span>
+          </span>
+          {% if f.name == filename %}<i class="bi bi-check2-circle text-warning"></i>{% endif %}
+        </a>
+      </div>
+      {% else %}
+      <div class="col-12">
+        <div class="logs-empty"><i class="bi bi-file-earmark-x"></i>
+          <div class="t">No log files exist yet</div>
+          <div class="h">
+            <code>request.log</code>, <code>server.log</code> and <code>errorlog.txt</code> are created the first time
+            the app writes to them. Load a couple of pages, then reload this tab.
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+{% if filename %}
+<div class="ui-card">
+  <div class="ui-card-header">
+    <h5><i class="bi bi-terminal"></i> {{ filename }}
+      <span class="logs-count ms-2">{{ entries|length }} line{{ '' if entries|length == 1 else 's' }} shown · file {{ file_size_human }}</span>
+    </h5>
+    <div class="ui-toolbar d-flex gap-2 flex-wrap">
+      <a class="btn btn-outline-warning btn-sm btn-pill fw-bold"
+         href="{{ url_for('system.logs_download', filename=filename) }}">
+        <i class="bi bi-download me-1"></i> Download
+      </a>
+      <a class="btn btn-outline-secondary btn-sm btn-pill fw-bold"
+         href="{{ url_for('system.logs_page', tab='server', file=filename, limit=limit) }}">
+        <i class="bi bi-x-circle me-1"></i> Clear filters
+      </a>
+    </div>
+  </div>
+
+  <div class="ui-card-body">
+    <form class="row g-2 align-items-end mb-3" method="get">
+      <input type="hidden" name="tab" value="server">
+      <input type="hidden" name="file" value="{{ filename }}">
+      <div class="col-6 col-lg-2">
+        <label class="ui-label">Level</label>
+        <select name="level" class="form-select form-select-sm">
+          <option value="">Any</option>
+          {% for lv in levels_available %}
+            <option value="{{ lv }}" {% if level == lv %}selected{% endif %}>{{ lv }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-lg-2">
+        <label class="ui-label">Lines</label>
+        <select name="limit" class="form-select form-select-sm">
+          {% for n in [200, 400, 1000, 2000, 5000] %}
+            <option value="{{ n }}" {% if limit == n %}selected{% endif %}>{{ n }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-lg-2">
+        <label class="ui-label">Logger</label>
+        <input type="text" name="logger" value="{{ logger_name }}" class="form-control form-control-sm" placeholder="request, app, db-busy">
+      </div>
+      <div class="col-12 col-lg-3">
+        <label class="ui-label">Contains text</label>
+        <input type="search" name="contains" value="{{ contains }}" class="form-control form-control-sm" placeholder="500, locked, /add_booking">
+      </div>
+      <div class="col-12 col-lg-3 d-flex gap-2">
+        <button class="btn btn-warning btn-sm fw-bold flex-grow-1"><i class="bi bi-funnel me-1"></i> Filter</button>
+      </div>
+    </form>
+
+    <div class="d-flex gap-3 flex-wrap mb-2">
+      {% for lv, n in level_counts.items() %}
+        <span class="logs-count">{{ lv }}: <strong>{{ '{:,}'.format(n) }}</strong></span>
+      {% endfor %}
+    </div>
+
+    {% if entries %}
+    <div class="logs-viewer">
+      {% for e in entries %}
+        <div class="logs-line">
+          <span class="ts">{{ e.ts or '—' }}</span>
+          <span class="lv {{ e.level }}">{{ e.level or '·' }}</span>
+          <span class="lg">{{ e.logger or '' }}</span>
+          <span class="msg">{{ e.message }}</span>
+        </div>
+      {% endfor %}
+    </div>
+    <div class="logs-sub mt-2">
+      Newest line first. Reading the last {{ limit }} lines of a {{ file_size_human }} file —
+      older lines are on disk but not shown. Rotation keeps the total bounded
+      (2 MB × 3 backups per file by default).
+    </div>
+    {% else %}
+    <div class="logs-empty"><i class="bi bi-search"></i>
+      <div class="t">No lines match</div>
+      <div class="h">
+        {% if level or contains or logger_name %}
+          The file exists ({{ file_size_human }}) but nothing in the last {{ limit }} lines matches these filters.
+        {% else %}
+          The file is empty right now — nothing has been logged to it yet.
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if request_sample %}
+<div class="ui-card mt-3">
+  <div class="ui-card-header">
+    <h5><i class="bi bi-speedometer"></i> Recent requests (parsed)</h5>
+    <span class="logs-count">method, path, status, duration</span>
+  </div>
+  <div class="ui-table-wrap">
+    <table class="ui-table">
+      <thead><tr><th>When</th><th>Request</th></tr></thead>
+      <tbody>
+        {% for e in request_sample %}
+        <tr><td class="logs-when">{{ e.ts }}</td><td class="logs-sub">{{ e.message }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endif %}

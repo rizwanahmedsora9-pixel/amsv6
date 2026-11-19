@@ -1,0 +1,189 @@
+{#
+  Shared Supplier Payment form — used for BOTH Create and Edit.
+  - Create: payment_id empty.
+  - Edit:   JS populates the fields from /accounts/payments/suppliers/<id>/data.
+  Field sizes made consistent with client payment form.
+#}
+{% from 'accounts/_entity_combobox.html' import entity_combobox %}
+<form id="supplierPaymentForm" class="modal-content border-secondary ui-helper-form" style="background: #1e293b;"
+      action="{{ url_for('accounts.supplier_payment_save') }}" method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="payment_id" id="spPaymentId" value="">
+    <input type="hidden" name="revision" id="spRevision" value="">
+    <input type="hidden" name="idempotency_key" id="spIdempotencyKey" value="">
+    <input type="hidden" name="show" value="{{ show_mode }}">
+    <div class="modal-header">
+        <h5 class="modal-title text-danger" id="supplierPaymentModalTitle"><i class="bi bi-truck me-2"></i>New Supplier Payment</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body">
+        <div class="row gy-3">
+            <!-- Row 1: Supplier + Amount – same sizing as client (8+4) -->
+            <div class="col-md-8">
+                {{ entity_combobox('spSupplier', supplier_options, code_attr='id', name_attr='name',
+                                   value_input_id='supplier_id', name_input_id='supplier_name',
+                                   label='Supplier', placeholder='Search by name…', required=True) }}
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Amount <span class="text-danger">*</span></label>
+                <input type="number" step="0.01" min="0" name="amount" id="spAmount"
+                       class="form-control bg-dark text-white border-secondary fw-bold" required placeholder="0.00" style="min-height: 42px; font-size: 1.05rem;">
+            </div>
+
+            <!-- Row 2: Method + Account – identical to client -->
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Method <span class="text-danger">*</span></label>
+                <select name="method" id="spMethod" class="form-select bg-dark text-white border-secondary" style="min-height: 42px;">
+                    {% for m in ['Cash','Bank','Check','Card','Online'] %}
+                    <option value="{{ m }}" {% if m == 'Cash' %}selected{% endif %}>{{ m }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-8">
+                {{ entity_combobox('spAccount', account_options, code_attr='id', name_attr='label',
+                                   value_input_id='payment_account_id',
+                                   label='Pay From Account', placeholder='Search by account, bank, or number…', required=True) }}
+            </div>
+
+            <!-- Row 2b: WHAT is being paid. A supplier payment always settles a
+                 real GRN payable: stock (qty x rate) or the GRN expenses that
+                 were ticked "Add to supplier ledger" on the GRN. -->
+            <div class="col-12" id="spObligationWrap">
+                <label class="form-label fw-semibold" for="spObligation">Pay against</label>
+                {% if pay_obligations %}
+                <select name="obligation_key" id="spObligation" class="form-select bg-dark text-white border-secondary" style="min-height: 42px;">
+                    <option value="">Oldest open GRN payable first (auto)</option>
+                    {% for ob in pay_obligations %}
+                    <option value="{{ ob.key }}" data-remaining="{{ '%.2f'|format(ob.remaining) }}"
+                            data-supplier="{{ ob.supplier_id or '' }}">
+                        {{ ob.bill_ref }} · {{ ob.date_label }} · {{ ob.label }} — due {{ '{:,.2f}'.format(ob.remaining) }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <div class="form-text text-white-50">
+                    Stock and GRN expenses are separate payables. Leave “auto” to settle the oldest first;
+                    pick one line to pay exactly that payable.
+                </div>
+                {% else %}
+                <select class="form-select bg-dark text-white border-secondary" disabled style="min-height: 42px;">
+                    <option>Select a supplier with an open GRN payable</option>
+                </select>
+                <div class="form-text text-warning">
+                    This supplier has no open GRN payable. Receive stock on a GRN first, then pay it here —
+                    a voucher can no longer float free of a GRN.
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Row 2c: extra money (over the open payable) is an advance -->
+            <div class="col-12" id="spAdvanceWrap">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="allow_advance" value="1" id="spAllowAdvance">
+                    <label class="form-check-label small" for="spAllowAdvance">
+                        Record any amount above the open payable as an advance to this supplier
+                    </label>
+                </div>
+            </div>
+
+            <!-- Row 3: References – same 4+4+4 layout as client -->
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Bill / Voucher Reference</label>
+                <input type="text" name="manual_bill_no" id="spManualBillNo"
+                       class="form-control bg-dark text-white border-secondary" placeholder="e.g. PV-1234" maxlength="50" style="min-height: 42px;">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Transaction Date</label>
+                <input type="date" name="date" id="spDate" class="form-control bg-dark text-white border-secondary" style="min-height: 42px;">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">Note Hint</label>
+                <input type="text" class="form-control bg-dark text-white border-secondary" value="Supplier payment" disabled style="min-height: 42px;">
+            </div>
+
+            <!-- Row 4: Note full width – same as client -->
+            <div class="col-12">
+                <label class="form-label fw-semibold">Note</label>
+                <textarea name="note" id="spNote" rows="3" maxlength="500" class="form-control bg-dark text-white border-secondary" placeholder="Optional note…" style="min-height: 72px;"></textarea>
+            </div>
+        </div>
+    </div>
+    <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-danger" id="supplierPaymentSubmitBtn"><i class="bi bi-check-lg me-1"></i>Save Payment</button>
+    </div>
+</form>
+
+<script>
+/* Pay Supplier → the payable list follows the chosen supplier.
+   A voucher must always land on a real GRN payable (stock or GRN expenses),
+   so the operator can see exactly what the money is settling. */
+(function () {
+  "use strict";
+  var hidden = document.getElementById("supplier_id");
+  var select = document.getElementById("spObligation");
+  if (!hidden || !select) return;
+  var form = document.getElementById("supplierPaymentForm");
+  var amount = document.getElementById("spAmount");
+  var autoOption = select.querySelector('option[value=""]');
+
+  function resetOptions(message) {
+    Array.prototype.slice.call(select.querySelectorAll("option")).forEach(function (option) {
+      if (option !== autoOption) option.remove();
+    });
+    autoOption.textContent = message;
+  }
+
+  function renderOpen(rows) {
+    resetOptions(rows.length ? "Oldest open GRN payable first (auto)" : "No open GRN payable for this supplier");
+    rows.forEach(function (row) {
+      var option = document.createElement("option");
+      option.value = row.key;
+      option.setAttribute("data-remaining", Number(row.remaining || 0).toFixed(2));
+      option.textContent = row.bill_ref + " · " + (row.date_label || "") + " · " + row.label +
+        " — due " + Number(row.remaining || 0).toLocaleString(undefined, {
+          minimumFractionDigits: 2, maximumFractionDigits: 2
+        });
+      select.appendChild(option);
+    });
+    select.disabled = rows.length === 0;
+    var submit = document.getElementById("supplierPaymentSubmitBtn");
+    if (submit) submit.disabled = rows.length === 0;
+    select.dataset.loaded = "1";
+  }
+
+  function load() {
+    var supplierId = String(hidden.value || "").trim();
+    if (!supplierId) { resetOptions("Select a supplier first"); return; }
+    fetch("/accounts/api/supplier_open_obligations/" + encodeURIComponent(supplierId), {
+      credentials: "same-origin"
+    })
+      .then(function (response) {
+        if (!response.ok) throw new Error("Could not load the supplier's open GRN payables.");
+        return response.json();
+      })
+      .then(function (data) { renderOpen((data && data.obligations) || []); })
+      .catch(function () { resetOptions("Could not load this supplier's open payables"); });
+  }
+
+  hidden.addEventListener("change", load);
+
+  select.addEventListener("change", function () {
+    if (!amount) return;
+    var option = select.options[select.selectedIndex];
+    var remaining = option ? parseFloat(option.getAttribute("data-remaining") || "") : NaN;
+    if (option && option.value && isFinite(remaining)) {
+      amount.value = remaining.toFixed(2);
+      amount.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+
+  if (form) form.addEventListener("submit", function (event) {
+    if (hidden.value && select.disabled) {
+      event.preventDefault();
+      window.alert("This supplier has no open GRN payable. Receive the stock on a GRN, then pay it from "
+        + "Accounts → PAY GRN.");
+    }
+  });
+
+  if (hidden.value) load(); else resetOptions("Select a supplier first");
+})();
+</script>

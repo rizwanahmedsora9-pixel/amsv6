@@ -1,0 +1,694 @@
+{% extends "layout.html" %}
+{% from "_ui/page_header.html" import render as ui_header %}
+{% from "_ui/kpi_tile.html" import tile as ui_tile %}
+{% from "_ui/filter_bar.html" import bar as ui_filter_bar %}
+{% block content %}
+<div class="ui-v2">
+
+  {% set _toolbar %}
+    <button type="button" class="btn btn-danger btn-pill fw-bold" data-bs-toggle="collapse" data-bs-target="#addLostEntryCard" aria-expanded="false" aria-controls="addLostEntryCard">
+      <i class="bi bi-plus-circle me-1"></i> Add Lost / Adjustment Entry
+    </button>
+    <a href="{{ url_for('inventory.stock_summary') }}" class="btn btn-warning btn-pill fw-bold">
+      <i class="bi bi-graph-up me-1"></i> Stock Summary
+    </a>
+    <a href="{{ url_for('inventory.lost_ledger_export', date_from=filters.date_from, date_to=filters.date_to, material=filters.material, material_category=filters.material_category, direction=filters.direction, reason=filters.reason, q=filters.q, show=filters.show) }}"
+       class="btn btn-outline-success btn-pill fw-bold">
+      <i class="bi bi-file-earmark-excel me-1"></i> Export
+    </a>
+    <button type="button" class="btn btn-outline-secondary btn-pill fw-bold" onclick="window.print()">
+      <i class="bi bi-printer"></i>
+    </button>
+  {% endset %}
+  {{ ui_header('bi-exclamation-triangle', 'Lost Ledger', subtitle='Stock shrinkage, damage, found surplus & physical count adjustments (updates Stock, FIFO & Profit/Loss)', toolbar=_toolbar) }}
+
+  {# ---- Quick Add Entry Collapsible Card ---- #}
+  <div class="collapse mb-3" id="addLostEntryCard">
+    <div class="ui-card border-danger border-opacity-50">
+      <div class="ui-card-header">
+        <h5><i class="bi bi-plus-circle text-danger"></i> Record Lost / Surplus Stock Adjustment</h5>
+        <button type="button" class="btn-close" data-bs-toggle="collapse" data-bs-target="#addLostEntryCard" aria-label="Close"></button>
+      </div>
+      <div class="ui-card-body">
+        <form method="POST" action="{{ url_for('inventory.lost_ledger_add') }}" id="addAdjustmentForm" class="ui-form">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="next" value="{{ request.full_path }}">
+
+          <div class="ui-row">
+            <div class="ui-field ui-col-3">
+              <label class="ui-label">Adjustment Type</label>
+              <select name="direction" id="addDirection" class="form-select" onchange="syncAddPreview()">
+                <option value="LOSS" selected>Loss / Shortage (Stock OUT)</option>
+                <option value="GAIN">Surplus / Found Extra (Stock IN)</option>
+              </select>
+            </div>
+            <div class="ui-field ui-col-3">
+              <label class="ui-label">Entry Mode</label>
+              <select name="entry_mode" id="addEntryMode" class="form-select" onchange="toggleAddMode()">
+                <option value="qty" selected>Enter Lost / Surplus Qty</option>
+                <option value="physical">Enter Physical Count (Auto Diff)</option>
+              </select>
+            </div>
+            <div class="ui-field ui-col-4">
+              <label class="ui-label">Material Brand *</label>
+              <select name="material" id="addMaterial" class="form-select" required onchange="refreshAddMaterialInfo()">
+                <option value="">-- Select Material --</option>
+                {% for m in materials %}
+                  <option value="{{ m.name }}"
+                          data-unit="{{ m.unit or 'Bags' }}"
+                          data-stock="{{ mat_stock_map.get(m.name, 0) }}"
+                          data-cost="{{ cost_map.get(m.name, {}).get('unit_cost', 0) }}"
+                          {{ 'selected' if filters.material == m.name }}>
+                    {{ m.name }} (Stock: {{ "{:g}".format(mat_stock_map.get(m.name, 0)) }} {{ m.unit or 'Bags' }})
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="ui-field ui-col-2">
+              <label class="ui-label">Date *</label>
+              <input type="date" name="adjustment_date" id="addDate" value="{{ today_str }}" class="form-control" required onchange="refreshAddMaterialInfo()">
+            </div>
+
+            <div class="ui-field ui-col-3" id="addQtyGroup">
+              <label class="ui-label">Quantity *</label>
+              <input type="number" step="any" min="0.0001" name="qty" id="addQty" class="form-control fw-bold" placeholder="e.g. 2" oninput="syncAddPreview()">
+            </div>
+            <div class="ui-field ui-col-3 d-none" id="addPhysGroup">
+              <label class="ui-label">Physical Count *</label>
+              <input type="number" step="any" min="0" name="physical_qty" id="addPhysicalQty" class="form-control fw-bold" placeholder="Actual counted stock" oninput="syncAddPreview()">
+            </div>
+            <div class="ui-field ui-col-3">
+              <label class="ui-label">Reason *</label>
+              <select name="reason" id="addReason" class="form-select" required>
+                {% for r in all_reasons %}
+                  <option value="{{ r }}" {{ 'selected' if r == 'Damage / Broken' }}>{{ r }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="ui-field ui-col-2">
+              <label class="ui-label">Unit Cost Override (Rs.)</label>
+              <input type="number" step="any" min="0" name="unit_cost" id="addUnitCost" class="form-control" placeholder="Auto (FIFO)" oninput="syncAddPreview()">
+            </div>
+            <div class="ui-field ui-col-4">
+              <label class="ui-label">Note / Explanation</label>
+              <input type="text" name="note" class="form-control" placeholder="e.g. Torn bags during unloading / count variance">
+            </div>
+          </div>
+
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mt-3 pt-3 border-top">
+            <div class="small" id="addLivePreview">
+              <span class="text-muted">Select a material and quantity to preview Stock &amp; Profit/Loss impact.</span>
+            </div>
+            <div class="d-flex gap-2">
+              <button type="button" class="btn btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#addLostEntryCard">Cancel</button>
+              <button type="submit" class="btn btn-danger fw-bold px-4">
+                <i class="bi bi-check2-circle me-1"></i> Save Adjustment
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  {# ---- Filter Bar ---- #}
+  {% call ui_filter_bar(action=url_for('inventory.lost_ledger')) %}
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">From Date</label>
+      <input type="date" name="date_from" value="{{ filters.date_from }}" class="form-control">
+    </div>
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">To Date</label>
+      <input type="date" name="date_to" value="{{ filters.date_to }}" class="form-control">
+    </div>
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">Material</label>
+      <select name="material" class="form-select">
+        <option value="">All Materials</option>
+        {% for m in materials %}
+          <option value="{{ m.name }}" {{ 'selected' if filters.material == m.name }}>{{ m.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">Category</label>
+      <select name="material_category" class="form-select">
+        <option value="">All Categories</option>
+        {% for cat in categories %}
+          <option value="{{ cat.id }}" {{ 'selected' if filters.material_category == (cat.id|string) }}>{{ cat.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">Type</label>
+      <select name="direction" class="form-select">
+        <option value="">All (Loss &amp; Surplus)</option>
+        <option value="LOSS" {{ 'selected' if filters.direction == 'LOSS' }}>Loss / Shortage</option>
+        <option value="GAIN" {{ 'selected' if filters.direction == 'GAIN' }}>Surplus / Found</option>
+      </select>
+    </div>
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">Reason</label>
+      <select name="reason" class="form-select">
+        <option value="">All Reasons</option>
+        {% for r in all_reasons %}
+          <option value="{{ r }}" {{ 'selected' if filters.reason == r }}>{{ r }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="ui-field ui-col-4">
+      <label class="ui-label">Search (Ref, Material, Note, User)</label>
+      <input type="text" name="q" value="{{ filters.q }}" class="form-control" placeholder="e.g. SB-SA-1000, cement, damage...">
+    </div>
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">Status</label>
+      <select name="show" class="form-select">
+        <option value="active" {{ 'selected' if filters.show == 'active' }}>Active Only</option>
+        <option value="voided" {{ 'selected' if filters.show == 'voided' }}>Deleted / Voided</option>
+        <option value="all" {{ 'selected' if filters.show == 'all' }}>All</option>
+      </select>
+    </div>
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">Rows / Page</label>
+      <select name="per_page" class="form-select">
+        {% for n in (15, 25, 50, 100) %}
+          <option value="{{ n }}" {{ 'selected' if filters.per_page == n }}>{{ n }} per page</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="ui-actions ui-col-4">
+      <label class="ui-label">&nbsp;</label>
+      <button type="submit" class="btn btn-warning fw-bold"><i class="bi bi-funnel me-1"></i> Apply Filters</button>
+      <a href="{{ url_for('inventory.lost_ledger') }}" class="btn btn-outline-secondary">Reset</a>
+    </div>
+
+    <div class="ui-col-12 d-flex flex-wrap align-items-center gap-2 pt-1">
+      <span class="small text-muted fw-bold">Quick Dates:</span>
+      <a href="{{ url_for('inventory.lost_ledger', material=filters.material, material_category=filters.material_category, direction=filters.direction, reason=filters.reason, q=filters.q, show=filters.show, per_page=filters.per_page) }}"
+         class="btn btn-sm {{ 'btn-warning fw-bold' if (not filters.date_from and not filters.date_to) else 'btn-outline-secondary' }}">All Dates</a>
+      <a href="{{ url_for('inventory.lost_ledger', date_from=today_str, date_to=today_str, material=filters.material, material_category=filters.material_category, direction=filters.direction, reason=filters.reason, q=filters.q, show=filters.show, per_page=filters.per_page) }}"
+         class="btn btn-sm {{ 'btn-warning fw-bold' if (filters.date_from == today_str and filters.date_to == today_str) else 'btn-outline-secondary' }}">Today</a>
+      <a href="{{ url_for('inventory.lost_ledger', date_from=month_start_str, date_to=today_str, material=filters.material, material_category=filters.material_category, direction=filters.direction, reason=filters.reason, q=filters.q, show=filters.show, per_page=filters.per_page) }}"
+         class="btn btn-sm {{ 'btn-warning fw-bold' if (filters.date_from == month_start_str and filters.date_to == today_str) else 'btn-outline-secondary' }}">This Month</a>
+      <a href="{{ url_for('inventory.lost_ledger', date_from=last30_str, date_to=today_str, material=filters.material, material_category=filters.material_category, direction=filters.direction, reason=filters.reason, q=filters.q, show=filters.show, per_page=filters.per_page) }}"
+         class="btn btn-sm {{ 'btn-warning fw-bold' if (filters.date_from == last30_str and filters.date_to == today_str) else 'btn-outline-secondary' }}">Last 30 Days</a>
+    </div>
+  {% endcall %}
+
+  {# ---- KPI Summary Tiles ---- #}
+  <div class="ui-kpi-grid">
+    {{ ui_tile(
+      href=url_for('inventory.lost_ledger', date_from=filters.date_from, date_to=filters.date_to, material=filters.material, material_category=filters.material_category, direction='LOSS', reason=filters.reason, q=filters.q, show='active'),
+      label='Total Lost Qty',
+      value=("{:g}".format(kpis.loss_qty)),
+      icon='bi-box-seam',
+      colour='red',
+      sub=(kpis.loss_count|string ~ ' loss adjustment(s)'),
+      cta='Filter losses'
+    ) }}
+    {{ ui_tile(
+      href=url_for('profit_reports', start_date=filters.date_from, end_date=filters.date_to, period=('custom' if filters.date_from or filters.date_to else 'all'), view='entries'),
+      label='Stock Loss Impact (P&L)',
+      value=("Rs. " ~ "{:,.2f}".format(kpis.loss_value)),
+      icon='bi-graph-down-arrow',
+      colour='rose',
+      sub='Reduces Net Profit in P&L',
+      cta='Open Profit & Loss'
+    ) }}
+    {{ ui_tile(
+      href=url_for('inventory.lost_ledger', date_from=filters.date_from, date_to=filters.date_to, material=filters.material, material_category=filters.material_category, direction='GAIN', reason=filters.reason, q=filters.q, show='active'),
+      label='Found / Surplus Value',
+      value=("Rs. " ~ "{:,.2f}".format(kpis.gain_value)),
+      icon='bi-plus-square',
+      colour='green',
+      sub=("+" ~ "{:g}".format(kpis.gain_qty) ~ " units (" ~ kpis.gain_count|string ~ " entries)"),
+      cta='Filter surplus'
+    ) }}
+    {{ ui_tile(
+      href=url_for('profit_reports', start_date=filters.date_from, end_date=filters.date_to, period=('custom' if filters.date_from or filters.date_to else 'all'), view='overview'),
+      label='Net Adjustment Value',
+      value=(("Rs. " if kpis.net_value >= 0 else "-Rs. ") ~ "{:,.2f}".format(kpis.net_value|abs)),
+      icon='bi-calculator',
+      colour=('amber' if kpis.net_value < 0 else 'cyan'),
+      sub=(kpis.active_count|string ~ ' active adjustment(s)'),
+      cta='View P&L Overview'
+    ) }}
+  </div>
+
+  {# ---- Material & Reason Breakdown Cards ---- #}
+  {% if by_material or by_reason %}
+  <div class="row g-3 mb-3">
+    <div class="col-lg-6">
+      <div class="ui-card h-100">
+        <div class="ui-card-header">
+          <h5><i class="bi bi-tags"></i> Breakdown by Material</h5>
+          <span class="small text-muted">{{ by_material|length }} material(s)</span>
+        </div>
+        <div class="ui-card-body flush">
+          <div class="ui-table-wrap" style="max-height: 250px; overflow-y: auto;">
+            <table class="ui-table">
+              <thead>
+                <tr>
+                  <th>Material</th>
+                  <th class="num">Lost</th>
+                  <th class="num">Surplus</th>
+                  <th class="num">Net P&amp;L Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for bm in by_material %}
+                {% set net_val = bm.gain_value - bm.loss_value %}
+                <tr>
+                  <td>
+                    <a href="{{ url_for('inventory.lost_ledger', date_from=filters.date_from, date_to=filters.date_to, material=bm.material, direction=filters.direction, show=filters.show) }}"
+                       class="fw-bold text-decoration-none">{{ bm.material }}</a>
+                    <span class="small text-muted">({{ bm.count }})</span>
+                  </td>
+                  <td class="num neg">{% if bm.loss_qty %}-{{ "{:g}".format(bm.loss_qty) }} {{ bm.unit }}{% else %}—{% endif %}</td>
+                  <td class="num pos">{% if bm.gain_qty %}+{{ "{:g}".format(bm.gain_qty) }} {{ bm.unit }}{% else %}—{% endif %}</td>
+                  <td class="num fw-bold {{ 'neg' if net_val < 0 else 'pos' }}">
+                    {{ "-Rs. " if net_val < 0 else "Rs. " }}{{ "{:,.2f}".format(net_val|abs) }}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="ui-card h-100">
+        <div class="ui-card-header">
+          <h5><i class="bi bi-pie-chart"></i> Breakdown by Reason</h5>
+          <span class="small text-muted">{{ by_reason|length }} reason(s)</span>
+        </div>
+        <div class="ui-card-body flush">
+          <div class="ui-table-wrap" style="max-height: 250px; overflow-y: auto;">
+            <table class="ui-table">
+              <thead>
+                <tr>
+                  <th>Reason</th>
+                  <th class="num">Entries</th>
+                  <th class="num">Qty</th>
+                  <th class="num">Net P&amp;L Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for br in by_reason %}
+                <tr>
+                  <td>
+                    <a href="{{ url_for('inventory.lost_ledger', date_from=filters.date_from, date_to=filters.date_to, material=filters.material, reason=br.reason, show=filters.show) }}"
+                       class="fw-bold text-decoration-none">{{ br.reason }}</a>
+                  </td>
+                  <td class="num">{{ br.count }}</td>
+                  <td class="num">
+                    {% if br.loss_qty %}<span class="neg">-{{ "{:g}".format(br.loss_qty) }}</span>{% endif %}
+                    {% if br.loss_qty and br.gain_qty %} / {% endif %}
+                    {% if br.gain_qty %}<span class="pos">+{{ "{:g}".format(br.gain_qty) }}</span>{% endif %}
+                  </td>
+                  <td class="num fw-bold {{ 'neg' if br.net_value < 0 else 'pos' }}">
+                    {{ "-Rs. " if br.net_value < 0 else "Rs. " }}{{ "{:,.2f}".format(br.net_value|abs) }}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ---- Main Entries Table + Pagination ---- #}
+  <div class="ui-card">
+    <div class="ui-card-header">
+      <h5><i class="bi bi-journal-minus"></i> Lost &amp; Adjustment Entries</h5>
+      <div class="d-flex align-items-center gap-2">
+        <span class="small text-muted fw-bold">
+          {% if total_rows %}
+            Showing {{ start_idx }}–{{ end_idx }} of {{ total_rows }} entries
+          {% else %}
+            0 entries
+          {% endif %}
+        </span>
+        <button type="button" class="btn btn-sm btn-danger fw-bold" data-bs-toggle="collapse" data-bs-target="#addLostEntryCard">
+          <i class="bi bi-plus-lg me-1"></i> Add Entry
+        </button>
+      </div>
+    </div>
+
+    <div class="ui-card-body flush">
+      <div class="ui-table-wrap">
+        <table class="ui-table">
+          <thead>
+            <tr>
+              <th>Date &amp; Time</th>
+              <th>Reference</th>
+              <th>Type</th>
+              <th>Material</th>
+              <th class="num">System → Physical</th>
+              <th class="num">Adjusted</th>
+              <th>Reason &amp; Note</th>
+              <th class="num">Unit Cost</th>
+              <th class="num">P&amp;L Impact</th>
+              <th>By</th>
+              <th class="num">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+            {% set adj = row.obj %}
+            {% set is_loss = (adj.direction or 'LOSS') == 'LOSS' %}
+            <tr class="{% if adj.is_void %}opacity-50{% endif %}">
+              <td class="text-nowrap">
+                <div class="fw-bold">{{ adj.adjustment_date }}</div>
+                <div class="small text-muted">{{ adj.adjustment_time or '' }}</div>
+              </td>
+              <td>
+                <a href="{{ url_for('profit_transaction_detail', document_type='StockAdjustment', document_id=adj.id) }}"
+                   class="badge bg-dark border border-secondary text-warning text-decoration-none">
+                  {{ adj.reference }}
+                </a>
+                {% if adj.source == 'stock_summary' %}
+                  <div class="small text-muted mt-1">Stock Summary</div>
+                {% endif %}
+              </td>
+              <td>
+                {% if adj.is_void %}
+                  <span class="badge bg-danger rounded-pill">DELETED</span>
+                {% elif is_loss %}
+                  <span class="badge bg-danger-subtle text-danger border border-danger border-opacity-25 rounded-pill fw-bold">LOSS (OUT)</span>
+                {% else %}
+                  <span class="badge bg-success-subtle text-success border border-success border-opacity-25 rounded-pill fw-bold">SURPLUS (IN)</span>
+                {% endif %}
+              </td>
+              <td>
+                <div class="fw-bold">{{ adj.material }}</div>
+                <div class="small text-muted">{{ row.category }}</div>
+              </td>
+              <td class="num text-nowrap small">
+                {% if adj.system_qty is not none and adj.physical_qty is not none %}
+                  {{ "{:g}".format(adj.system_qty) }} → <strong>{{ "{:g}".format(adj.physical_qty) }}</strong> {{ row.unit }}
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td class="num fw-bold {{ 'neg' if is_loss else 'pos' }}">
+                {{ '-' if is_loss else '+' }}{{ "{:g}".format(adj.qty or 0) }} {{ row.unit }}
+              </td>
+              <td style="max-width: 240px;">
+                <div class="fw-bold small">{{ adj.reason }}</div>
+                {% if adj.note %}
+                  <div class="small text-muted text-truncate" title="{{ adj.note }}">{{ adj.note }}</div>
+                {% endif %}
+                {% if adj.is_void and adj.void_reason %}
+                  <div class="small text-danger">Voided: {{ adj.void_reason }}</div>
+                {% endif %}
+              </td>
+              <td class="num small">
+                {% if row.effective_unit_cost > 0 %}
+                  Rs. {{ "{:,.2f}".format(row.effective_unit_cost) }}
+                {% else %}
+                  <span class="text-muted">Unpriced</span>
+                {% endif %}
+              </td>
+              <td class="num fw-bold {{ 'text-muted' if adj.is_void else ('neg' if is_loss else 'pos') }}">
+                {% if adj.is_void %}
+                  Reversed
+                {% elif not row.pl_included %}
+                  <span class="badge bg-warning text-dark" title="{{ row.effective_basis }}">Unresolved Cost</span>
+                {% else %}
+                  {{ "-Rs. " if is_loss else "+Rs. " }}{{ "{:,.2f}".format(row.effective_value) }}
+                {% endif %}
+              </td>
+              <td class="small text-muted">{{ adj.created_by or 'System' }}</td>
+              <td class="num text-nowrap">
+                {% if not adj.is_void %}
+                  <button type="button" class="btn btn-warning btn-sm fw-bold rounded-pill text-dark me-1"
+                          onclick="openEditAdjustmentModal(this)"
+                          data-id="{{ adj.id }}"
+                          data-ref="{{ adj.reference }}"
+                          data-date="{{ adj.adjustment_date }}"
+                          data-material="{{ adj.material }}"
+                          data-direction="{{ adj.direction }}"
+                          data-qty="{{ '{:g}'.format(adj.qty or 0) }}"
+                          data-reason="{{ adj.reason }}"
+                          data-note="{{ adj.note or '' }}"
+                          data-cost="{{ '{:g}'.format(adj.unit_cost or 0) if adj.unit_cost else '' }}"
+                          data-entry-id="{{ adj.entry_id or '' }}">
+                    <i class="bi bi-pencil-fill"></i>
+                  </button>
+                  <a href="{{ url_for('profit_transaction_detail', document_type='StockAdjustment', document_id=adj.id) }}"
+                     class="btn btn-outline-info btn-sm rounded-pill me-1" title="View in Profit & Loss">
+                    <i class="bi bi-diagram-3"></i>
+                  </a>
+                  <form method="POST" action="{{ url_for('inventory.lost_ledger_delete', adj_id=adj.id) }}" class="d-inline"
+                        onsubmit="return confirm('Delete {{ adj.reference }} permanently? Stock and Profit & Loss impact will be reversed immediately. This cannot be undone.');">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="next" value="{{ request.full_path }}">
+                    <button type="submit" class="btn btn-outline-danger btn-sm rounded-pill" title="Delete">
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </form>
+                {% else %}
+                  <span class="badge bg-secondary" title="Deleted before the immediate-delete policy (legacy row kept inert)">Deleted</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="11" class="ui-empty py-4">
+                No stock adjustment entries found for the selected filters.
+                <a href="#addLostEntryCard" class="ms-2 fw-bold" data-bs-toggle="collapse">Add your first entry</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {% if total_pages > 1 %}
+    <div class="ui-card-body border-top d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div class="small text-muted">Page {{ filters.page }} of {{ total_pages }} ({{ total_rows }} total)</div>
+      <nav aria-label="Lost Ledger pagination">
+        <ul class="pagination pagination-sm mb-0">
+          <li class="page-item {{ 'disabled' if filters.page <= 1 }}">
+            <a class="page-link" href="{{ url_for('inventory.lost_ledger', date_from=filters.date_from, date_to=filters.date_to, material=filters.material, material_category=filters.material_category, direction=filters.direction, reason=filters.reason, q=filters.q, show=filters.show, per_page=filters.per_page, page=filters.page - 1) }}">Previous</a>
+          </li>
+          {% for p in page_window %}
+            {% if p is none %}
+              <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% else %}
+              <li class="page-item {{ 'active' if p == filters.page }}">
+                <a class="page-link" href="{{ url_for('inventory.lost_ledger', date_from=filters.date_from, date_to=filters.date_to, material=filters.material, material_category=filters.material_category, direction=filters.direction, reason=filters.reason, q=filters.q, show=filters.show, per_page=filters.per_page, page=p) }}">{{ p }}</a>
+              </li>
+            {% endif %}
+          {% endfor %}
+          <li class="page-item {{ 'disabled' if filters.page >= total_pages }}">
+            <a class="page-link" href="{{ url_for('inventory.lost_ledger', date_from=filters.date_from, date_to=filters.date_to, material=filters.material, material_category=filters.material_category, direction=filters.direction, reason=filters.reason, q=filters.q, show=filters.show, per_page=filters.per_page, page=filters.page + 1) }}">Next</a>
+          </li>
+        </ul>
+      </nav>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{# ---- Reusable Edit Modal ---- #}
+<div class="modal fade" id="editAdjustmentModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content border-secondary shadow-lg" style="background: #1e293b; color: #f8fafc; border-radius: 14px;">
+      <form method="POST" id="editAdjustmentForm">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="{{ request.full_path }}">
+        <div class="modal-header border-secondary">
+          <h5 class="modal-title fw-bold text-warning">
+            <i class="bi bi-pencil-square me-2"></i> Edit Adjustment <span id="editModalRef"></span>
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label small fw-bold text-white-50">Type</label>
+              <select name="direction" id="editDirection" class="form-select bg-dark text-white border-secondary">
+                <option value="LOSS">Loss / Shortage (Stock OUT)</option>
+                <option value="GAIN">Surplus / Found Extra (Stock IN)</option>
+              </select>
+            </div>
+            <div class="col-md-5">
+              <label class="form-label small fw-bold text-white-50">Material</label>
+              <select name="material" id="editMaterial" class="form-select bg-dark text-white border-secondary" required>
+                {% for m in materials %}
+                  <option value="{{ m.name }}">{{ m.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small fw-bold text-white-50">Date</label>
+              <input type="date" name="adjustment_date" id="editDate" class="form-control bg-dark text-white border-secondary" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small fw-bold text-white-50">Adjusted Qty</label>
+              <input type="number" step="any" min="0.0001" name="qty" id="editQty" class="form-control bg-dark text-white border-secondary fw-bold" required>
+            </div>
+            <div class="col-md-5">
+              <label class="form-label small fw-bold text-white-50">Reason</label>
+              <select name="reason" id="editReason" class="form-select bg-dark text-white border-secondary" required>
+                {% for r in all_reasons %}
+                  <option value="{{ r }}">{{ r }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small fw-bold text-white-50">Unit Cost Override</label>
+              <input type="number" step="any" min="0" name="unit_cost" id="editUnitCost" class="form-control bg-dark text-white border-secondary" placeholder="Auto (FIFO)">
+            </div>
+            <div class="col-12">
+              <label class="form-label small fw-bold text-white-50">Note / Reason for Edit</label>
+              <input type="text" name="note" id="editNote" class="form-control bg-dark text-white border-secondary" placeholder="Explanation or audit note">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-secondary">
+          <button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-warning fw-bold text-dark px-4">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+const _addMatCache = {};
+
+function toggleAddMode() {
+  const mode = document.getElementById('addEntryMode').value;
+  const qtyGroup = document.getElementById('addQtyGroup');
+  const physGroup = document.getElementById('addPhysGroup');
+  const qtyInp = document.getElementById('addQty');
+  const physInp = document.getElementById('addPhysicalQty');
+  const dirSel = document.getElementById('addDirection');
+  if (mode === 'physical') {
+    qtyGroup.classList.add('d-none');
+    physGroup.classList.remove('d-none');
+    qtyInp.removeAttribute('required');
+    physInp.setAttribute('required', 'required');
+    dirSel.disabled = true;
+  } else {
+    physGroup.classList.add('d-none');
+    qtyGroup.classList.remove('d-none');
+    physInp.removeAttribute('required');
+    qtyInp.setAttribute('required', 'required');
+    dirSel.disabled = false;
+  }
+  syncAddPreview();
+}
+
+async function refreshAddMaterialInfo() {
+  const mat = document.getElementById('addMaterial').value;
+  const dt = document.getElementById('addDate').value;
+  const dir = document.getElementById('addDirection').value;
+  if (!mat) {
+    syncAddPreview();
+    return;
+  }
+  try {
+    const url = "{{ url_for('inventory.lost_ledger_material_info') }}?material=" + encodeURIComponent(mat) + "&date=" + encodeURIComponent(dt) + "&direction=" + encodeURIComponent(dir);
+    const resp = await fetch(url);
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.ok) {
+        _addMatCache[mat + '|' + dt] = data;
+      }
+    }
+  } catch (e) {}
+  syncAddPreview();
+}
+
+function syncAddPreview() {
+  const preview = document.getElementById('addLivePreview');
+  const matSel = document.getElementById('addMaterial');
+  const mat = matSel.value;
+  const dt = document.getElementById('addDate').value;
+  const mode = document.getElementById('addEntryMode').value;
+  const dirSel = document.getElementById('addDirection');
+  const costOverride = parseFloat(document.getElementById('addUnitCost').value);
+
+  if (!mat) {
+    preview.innerHTML = '<span class="text-muted">Select a material and quantity to preview Stock &amp; Profit/Loss impact.</span>';
+    return;
+  }
+
+  const opt = matSel.options[matSel.selectedIndex];
+  const cached = _addMatCache[mat + '|' + dt];
+  const sysQty = cached ? cached.system_qty : (parseFloat(opt.getAttribute('data-stock')) || 0);
+  const unit = cached ? cached.unit : (opt.getAttribute('data-unit') || 'Bags');
+  const estCost = !isNaN(costOverride) && costOverride > 0
+    ? costOverride
+    : (cached ? cached.unit_cost : (parseFloat(opt.getAttribute('data-cost')) || 0));
+
+  let delta = 0;
+  let after = sysQty;
+  let dir = dirSel.value;
+
+  if (mode === 'physical') {
+    const physRaw = document.getElementById('addPhysicalQty').value;
+    if (physRaw === '') {
+      preview.innerHTML = 'System stock on <strong>' + dt + '</strong>: <strong>' + sysQty + ' ' + unit + '</strong>. Enter physical count.';
+      return;
+    }
+    const phys = parseFloat(physRaw) || 0;
+    delta = Math.round((phys - sysQty) * 10000) / 10000;
+    after = phys;
+    dir = delta < 0 ? 'LOSS' : 'GAIN';
+  } else {
+    const qtyRaw = document.getElementById('addQty').value;
+    if (qtyRaw === '') {
+      preview.innerHTML = 'System stock on <strong>' + dt + '</strong>: <strong>' + sysQty + ' ' + unit + '</strong> · Est. unit cost: <strong>Rs. ' + estCost.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '</strong>';
+      return;
+    }
+    const qty = parseFloat(qtyRaw) || 0;
+    delta = (dir === 'LOSS') ? -qty : qty;
+    after = Math.round((sysQty + delta) * 10000) / 10000;
+  }
+
+  const absQty = Math.abs(delta);
+  const val = absQty * estCost;
+  const valFmt = val.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const sign = delta < 0 ? '-' : '+';
+  const badgeCls = delta < 0 ? 'text-danger' : (delta > 0 ? 'text-success' : 'text-muted');
+  preview.innerHTML =
+    'System: <strong>' + sysQty + ' ' + unit + '</strong> → After: <strong>' + after + ' ' + unit + '</strong> ' +
+    '(<span class="fw-bold ' + badgeCls + '">' + sign + absQty + '</span>) · ' +
+    'Est. P&amp;L Impact: <span class="fw-bold ' + badgeCls + '">' + (delta < 0 ? '-Rs. ' : '+Rs. ') + valFmt + '</span>';
+}
+
+function openEditAdjustmentModal(btn) {
+  const id = btn.getAttribute('data-id');
+  const form = document.getElementById('editAdjustmentForm');
+  form.action = "{{ url_for('inventory.lost_ledger_edit', adj_id=0) }}".replace('/0', '/' + id);
+  document.getElementById('editModalRef').textContent = btn.getAttribute('data-ref') || '';
+  document.getElementById('editDirection').value = btn.getAttribute('data-direction') || 'LOSS';
+  document.getElementById('editMaterial').value = btn.getAttribute('data-material') || '';
+  document.getElementById('editDate').value = btn.getAttribute('data-date') || '';
+  document.getElementById('editQty').value = btn.getAttribute('data-qty') || '';
+  document.getElementById('editReason').value = btn.getAttribute('data-reason') || '';
+  document.getElementById('editNote').value = btn.getAttribute('data-note') || '';
+  document.getElementById('editUnitCost').value = btn.getAttribute('data-cost') || '';
+  const modal = new bootstrap.Modal(document.getElementById('editAdjustmentModal'));
+  modal.show();
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  const matSel = document.getElementById('addMaterial');
+  if (matSel && matSel.value) {
+    refreshAddMaterialInfo();
+  }
+});
+</script>
+{% endblock %}

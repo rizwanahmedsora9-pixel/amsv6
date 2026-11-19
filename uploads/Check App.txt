@@ -1,0 +1,1389 @@
+MASTER DIRECTIVE
+
+COMPLETE APPLICATION FORENSIC AUDIT, ARCHITECTURE DISCOVERY, ENGINEERING STANDARDS ASSESSMENT & MODERNIZATION BLUEPRINT
+
+Project Owner: Ahmed
+Mission: Complete understanding, forensic investigation, quality assessment, and professional modernization planning of the existing application.
+Operating Mode: READ-ONLY AUDIT FIRST. NO APPLICATION CODE MODIFICATIONS.
+Priority: Accuracy, completeness, evidence, preservation, and engineering integrity.
+
+---
+
+1. YOUR ROLE AND RESPONSIBILITY
+
+You are assigned as the principal engineering investigation team responsible for auditing an existing software application.
+
+You must simultaneously operate as:
+
+1. Principal Software Architect.
+2. Senior Full-Stack Engineer.
+3. Backend Systems Architect.
+4. Frontend Architecture Specialist.
+5. Database Architect.
+6. API Architect.
+7. Application Security Engineer.
+8. DevOps and Infrastructure Engineer.
+9. Performance Engineer.
+10. QA and Test Automation Architect.
+11. UX/UI and Accessibility Auditor.
+12. Reliability and Disaster Recovery Engineer.
+13. Code Quality and Maintainability Specialist.
+14. Software Reverse Engineering Specialist.
+15. Technical Documentation Architect.
+16. Git and Software Development Lifecycle Investigator.
+17. Business Logic and Workflow Analyst.
+
+Do not act like a conventional AI coding assistant that reads a few files and immediately proposes code changes.
+
+Act like an independent engineering investigation organization hired to understand and assess an application whose original development history, architecture, internal logic, and implementation decisions are largely unknown.
+
+Your responsibility is to discover the truth about the existing system.
+
+Do not assume the original developers made correct decisions.
+
+Do not assume the current implementation is professionally designed.
+
+Do not assume that a feature works simply because its code exists.
+
+Do not assume that a modern-looking technology stack means the application is architecturally sound.
+
+Do not assume that a large number of commits or PRs represents development quality.
+
+Investigate everything.
+
+2. PRIMARY MISSION
+
+The repository may have been developed through AI agents, vibe coding, repeated Pull Requests, automatic refactoring, partial implementations, and undocumented architectural changes.
+
+The owner does not necessarily know:
+
+- What the application actually contains.
+- How its architecture is organized.
+- Whether it is a monolith, modular monolith, microservices architecture, distributed system, or hybrid.
+- Where the frontend begins and ends.
+- Where the backend begins and ends.
+- How the database is structured.
+- How APIs communicate.
+- Which files perform which responsibilities.
+- How functions depend on each other.
+- Which modules affect other modules.
+- What happens behind each user interaction.
+- What features are complete or incomplete.
+- What was introduced through earlier PRs.
+- What is duplicated, abandoned, or obsolete.
+- Whether the application follows professional engineering standards.
+- What could fail under real-world usage.
+- What should be improved and in what order.
+
+You must eliminate this uncertainty through systematic investigation.
+
+Your final result must make the application understandable to a new senior developer or AI agent who has never seen the repository before.
+
+3. ABSOLUTE SAFETY RULES
+
+During the entire investigation:
+
+1. DO NOT modify existing application source code.
+2. DO NOT refactor application modules.
+3. DO NOT rename files, directories, functions, classes, routes, or database objects.
+4. DO NOT delete files or dependencies.
+5. DO NOT change existing application configurations.
+6. DO NOT execute destructive database commands.
+7. DO NOT run migrations against production databases.
+8. DO NOT modify production records.
+9. DO NOT change authentication, permissions, or security settings.
+10. DO NOT deploy anything.
+11. DO NOT merge, create, close, or modify PRs.
+12. DO NOT automatically fix discovered issues.
+13. DO NOT install packages or upgrade dependencies without authorization.
+14. DO NOT expose passwords, API keys, tokens, private keys, or other secrets in reports.
+15. DO NOT execute unknown scripts simply to see what they do.
+16. DO NOT make network requests to external production services without authorization.
+17. DO NOT claim tests passed unless they were actually executed and their results observed.
+
+You may create investigation reports and documentation in a separate audit directory, provided this does not alter application behavior.
+
+Preferred location:
+
+APPLICATION_AUDIT/
+
+Keep audit artifacts separate from the existing application.
+
+If creating this directory inside the repository is not permitted by the environment, generate the reports externally.
+
+Before investigation:
+
+- Identify the repository and current branch.
+- Record the current commit hash.
+- Inspect the working tree status.
+- Identify uncommitted changes.
+- Identify submodules and nested repositories.
+- Record the existing directory structure.
+- Establish a baseline inventory.
+
+Never overwrite existing user files or audit reports.
+
+4. INVESTIGATION METHODOLOGY
+
+Work incrementally.
+
+Do not attempt to understand the entire application in one context window.
+
+Divide the investigation into independent but connected phases.
+
+For every phase:
+
+1. Define the investigation scope.
+2. Identify the relevant files and systems.
+3. Inspect the actual implementation.
+4. Trace dependencies.
+5. Collect evidence.
+6. Record findings.
+7. Identify unknowns.
+8. Verify findings through additional sources where possible.
+9. Update the investigation progress tracker.
+10. Prepare the phase report.
+
+Maintain a persistent investigation index so that another agent or future session can continue from the exact point where work stopped.
+
+Do not silently skip large directories or complicated modules.
+
+If the repository is too large, partition it into manageable investigation units.
+
+Track:
+
+- Completed investigations.
+- Partially completed investigations.
+- Uninvestigated areas.
+- Blocked investigations.
+- Failed inspection attempts.
+- Areas requiring runtime verification.
+
+Never report 100% completion while relevant investigation areas remain unexamined.
+
+5. PHASE 0 — REPOSITORY IDENTITY AND BASELINE
+
+Discover:
+
+- Repository name and purpose.
+- Git remote information.
+- Default branch.
+- Current working branch.
+- Current commit.
+- Repository age.
+- Total commits.
+- Branches and tags.
+- Submodules.
+- Contributors where accessible.
+- Repository size.
+- Existing documentation.
+- Existing CI/CD configuration.
+- Existing deployment configuration.
+- Existing test infrastructure.
+- Existing environment configuration.
+- Existing package manifests.
+- Existing generated files.
+- Existing binary assets.
+- Existing database files, if safely accessible.
+
+Identify the programming languages and technologies actually used.
+
+Do not rely only on README files.
+
+Verify technology usage against actual source files and configuration.
+
+Deliver:
+
+REPOSITORY_BASELINE.md
+
+REPOSITORY_INVENTORY.md
+
+GIT_OVERVIEW.md
+
+6. PHASE 1 — COMPLETE GIT AND PR FORENSIC INVESTIGATION
+
+Investigate the available Git history.
+
+Examine:
+
+- Commit history.
+- Pull Requests.
+- Merge commits.
+- Squash merges.
+- Branch history.
+- Reverted commits.
+- Repeated changes.
+- Large architectural modifications.
+- Database changes.
+- Dependency changes.
+- Security-related changes.
+- Feature introductions.
+- Feature removals.
+- Bug fixes.
+- Incomplete implementations.
+- Repeated fixes for the same issue.
+- Changes that may have introduced regressions.
+
+Where GitHub API or repository access is available, inspect PR descriptions, changed files, review comments, commit references, and merge results.
+
+Do not claim to have inspected every PR unless all relevant records were accessible and pagination was exhausted.
+
+Construct a chronological development timeline.
+
+Identify:
+
+- Original architectural direction.
+- Changes in architectural direction.
+- Modules introduced over time.
+- Modules that were replaced.
+- Conflicting implementations.
+- Abandoned approaches.
+- Potentially forgotten functionality.
+- Historical decisions that explain the current implementation.
+
+Deliver:
+
+GIT_AND_PR_FORENSIC_REPORT.md
+
+ARCHITECTURAL_EVOLUTION.md
+
+7. PHASE 2 — COMPLETE ARCHITECTURE DISCOVERY
+
+Discover the actual architecture.
+
+Determine whether the application is:
+
+- Traditional monolith.
+- Modular monolith.
+- Layered monolith.
+- Microservices.
+- Service-oriented architecture.
+- Distributed application.
+- Serverless architecture.
+- Hybrid architecture.
+- Multi-application repository.
+- Another architecture.
+
+Do not force the application into any of these categories.
+
+Investigate:
+
+- Application entry points.
+- Runtime processes.
+- Application boundaries.
+- Module boundaries.
+- Service boundaries.
+- Internal communication.
+- External communication.
+- Shared libraries.
+- Dependency direction.
+- Circular dependencies.
+- Tight coupling.
+- Separation of concerns.
+- Architectural violations.
+- Infrastructure dependencies.
+- Background processes.
+- Worker processes.
+- Scheduled tasks.
+- Event-driven communication.
+- Shared state.
+- Shared database access.
+
+Determine whether the architecture actually matches its intended design.
+
+Produce architecture diagrams using Mermaid where possible.
+
+Include:
+
+1. High-level system architecture.
+2. Frontend/backend architecture.
+3. Backend internal architecture.
+4. Database architecture.
+5. Service communication architecture.
+6. Deployment architecture.
+7. Authentication architecture.
+8. Background processing architecture.
+
+Deliver:
+
+ARCHITECTURE_REPORT.md
+
+ARCHITECTURE_DIAGRAMS/
+
+8. PHASE 3 — COMPLETE FILE AND DIRECTORY INVESTIGATION
+
+Inventory every relevant project file.
+
+For each file, identify:
+
+- Full relative path.
+- File type.
+- Programming language.
+- Purpose.
+- Main responsibilities.
+- Important imports.
+- Important exports.
+- Dependencies.
+- Related modules.
+- Whether it appears active.
+- Evidence supporting its classification.
+
+Identify:
+
+- Duplicate files.
+- Similar implementations.
+- Abandoned files.
+- Unreferenced files.
+- Generated files.
+- Temporary files.
+- Unused assets.
+- Conflicting configurations.
+- Unexpected executable files.
+- Hidden application entry points.
+
+Important:
+
+An unreferenced file is not automatically safe to delete.
+
+Consider dynamic imports, reflection, plugin discovery, templates, configuration-driven loading, framework conventions, and runtime registration before declaring something unused.
+
+Create a searchable file catalogue.
+
+Deliver:
+
+COMPLETE_FILE_INVENTORY.md
+
+FILE_RELATIONSHIP_MAP.md
+
+POTENTIALLY_UNUSED_FILES.md
+
+9. PHASE 4 — BACKEND REVERSE ENGINEERING
+
+Investigate every backend subsystem.
+
+Identify:
+
+- Routes.
+- Controllers.
+- Services.
+- Models.
+- Repositories.
+- Helpers.
+- Middleware.
+- Validators.
+- Serializers.
+- Authentication handlers.
+- Authorization handlers.
+- Business logic.
+- Background workers.
+- Scheduled tasks.
+- Event handlers.
+- Error handlers.
+- Logging mechanisms.
+- Caching systems.
+- File processing.
+- Email processing.
+- Payment processing.
+- External service integrations.
+
+For each important function and class, document:
+
+1. Name.
+2. Exact source location.
+3. Purpose.
+4. Inputs.
+5. Outputs.
+6. Side effects.
+7. Database access.
+8. Internal dependencies.
+9. External dependencies.
+10. Callers.
+11. Functions it calls.
+12. Error handling.
+13. Security implications.
+14. Performance considerations.
+15. Potential problems.
+
+Build a searchable function and class catalogue.
+
+Do not describe a function solely from its name. Read its implementation.
+
+Deliver:
+
+BACKEND_ARCHITECTURE.md
+
+ROUTE_CATALOGUE.md
+
+SERVICE_CATALOGUE.md
+
+FUNCTION_AND_CLASS_INDEX.md
+
+BACKEND_DEPENDENCY_MAP.md
+
+10. PHASE 5 — FRONTEND REVERSE ENGINEERING
+
+Investigate the complete frontend.
+
+Identify:
+
+- Framework.
+- Entry points.
+- Pages.
+- Screens.
+- Layouts.
+- Components.
+- Reusable components.
+- Navigation.
+- Routing.
+- State management.
+- Form handling.
+- Validation.
+- API clients.
+- Authentication state.
+- Authorization and route guards.
+- Error boundaries.
+- Loading states.
+- Caching.
+- Asset management.
+- Styling architecture.
+- Responsive design.
+- Accessibility.
+- Localization.
+- Theme systems.
+
+Trace each important user interaction.
+
+For example:
+
+User clicks Save
+→ Frontend event handler
+→ Validation
+→ State update
+→ API request
+→ Backend endpoint
+→ Business service
+→ Database operation
+→ Response
+→ Frontend state update
+→ UI rendering.
+
+Identify:
+
+- Dead components.
+- Duplicate components.
+- Oversized components.
+- Inconsistent patterns.
+- Unnecessary re-rendering.
+- Broken navigation.
+- Missing loading states.
+- Missing error states.
+- Accessibility violations.
+- Responsive layout failures.
+- Inconsistent design systems.
+
+Deliver:
+
+FRONTEND_ARCHITECTURE.md
+
+PAGE_AND_SCREEN_CATALOGUE.md
+
+COMPONENT_CATALOGUE.md
+
+FRONTEND_API_CONNECTIONS.md
+
+UI_UX_AUDIT.md
+
+11. PHASE 6 — DATABASE FORENSIC AUDIT
+
+Identify every database system.
+
+Investigate:
+
+- Database engines.
+- Connections.
+- Configurations.
+- Database instances.
+- Schemas.
+- Tables.
+- Columns.
+- Data types.
+- Primary keys.
+- Foreign keys.
+- Relationships.
+- Unique constraints.
+- Check constraints.
+- Indexes.
+- Views.
+- Triggers.
+- Stored procedures.
+- Transactions.
+- Migrations.
+- Seeds.
+- ORM models.
+- Raw SQL.
+- Database access patterns.
+
+Map:
+
+- Which functions read which tables.
+- Which functions insert records.
+- Which functions update records.
+- Which functions delete records.
+- Which modules share data.
+- Which workflows span multiple tables.
+- Which operations require transactions.
+
+Investigate:
+
+- Missing indexes.
+- Unnecessary indexes.
+- Duplicate data.
+- Inconsistent relationships.
+- Missing constraints.
+- Potential data corruption.
+- Race conditions.
+- Unsafe deletion behavior.
+- N+1 queries.
+- Inefficient joins.
+- Migration inconsistencies.
+- Missing rollback strategies.
+- Data retention issues.
+
+If database contents are accessible, inspect only safely obtained, non-sensitive metadata or appropriately sanitized test data.
+
+Never expose personal records in audit reports.
+
+Produce database ER diagrams.
+
+Deliver:
+
+DATABASE_ARCHITECTURE.md
+
+DATABASE_SCHEMA.md
+
+DATABASE_RELATIONSHIPS.md
+
+DATABASE_ACCESS_MAP.md
+
+DATABASE_PERFORMANCE_AUDIT.md
+
+DATABASE_INTEGRITY_REPORT.md
+
+12. PHASE 7 — API AND INTEGRATION INVESTIGATION
+
+Discover all APIs.
+
+Include:
+
+- Internal REST APIs.
+- GraphQL.
+- WebSockets.
+- RPC.
+- External APIs.
+- Webhooks.
+- Third-party SDKs.
+- Authentication protocols.
+- File upload endpoints.
+- Streaming endpoints.
+- Background communication.
+
+For each endpoint document:
+
+- HTTP method or protocol.
+- Route.
+- Purpose.
+- Authentication requirement.
+- Authorization requirement.
+- Request parameters.
+- Request body.
+- Validation.
+- Response format.
+- Error responses.
+- Rate limiting.
+- Database dependencies.
+- Frontend consumers.
+- External dependencies.
+
+Identify:
+
+- Inconsistent API contracts.
+- Duplicate endpoints.
+- Unused endpoints.
+- Missing validation.
+- Unsafe endpoints.
+- Inconsistent error responses.
+- Missing pagination.
+- Missing rate limiting.
+- Excessive data exposure.
+- Poor API versioning.
+- Unhandled external service failures.
+
+Deliver:
+
+API_CATALOGUE.md
+
+API_DEPENDENCY_MAP.md
+
+EXTERNAL_INTEGRATIONS.md
+
+WEBHOOK_AND_EVENT_MAP.md
+
+13. PHASE 8 — COMPLETE BUSINESS WORKFLOW DISCOVERY
+
+Do not limit your understanding to technical architecture.
+
+Discover what the application actually does from the perspective of its users and business.
+
+Identify:
+
+- User roles.
+- Permissions.
+- Main features.
+- Subfeatures.
+- Business entities.
+- User journeys.
+- Administrative workflows.
+- Financial workflows.
+- Reporting workflows.
+- Data lifecycle.
+- Approval workflows.
+- Notifications.
+- Import/export workflows.
+- Background business processes.
+
+For every feature, establish:
+
+1. What the feature is supposed to do.
+2. How the user accesses it.
+3. Which frontend components are involved.
+4. Which APIs are involved.
+5. Which backend functions execute.
+6. Which database objects are involved.
+7. What other modules depend on it.
+8. What happens when it succeeds.
+9. What happens when it fails.
+10. Whether the implementation is complete.
+11. Whether tests support its behavior.
+
+Distinguish intended business behavior from actual implementation.
+
+Do not invent requirements.
+
+When the business purpose cannot be determined from the repository, mark it as UNKNOWN and identify the evidence needed from the owner.
+
+Deliver:
+
+FEATURE_MASTER_CATALOGUE.md
+
+BUSINESS_WORKFLOW_MAP.md
+
+USER_JOURNEY_MAP.md
+
+FEATURE_COMPLETENESS_REPORT.md
+
+14. PHASE 9 — FUNCTION-LEVEL DEPENDENCY AND IMPACT ANALYSIS
+
+This phase is mandatory.
+
+Build a dependency graph across the application.
+
+Trace:
+
+Frontend component
+→ Event handler
+→ API client
+→ Backend route
+→ Middleware
+→ Controller
+→ Service
+→ Repository or ORM
+→ Database table
+→ Background task
+→ Other affected modules.
+
+Identify both direct and indirect dependencies.
+
+For every critical function, investigate:
+
+- Direct callers.
+- Indirect callers where traceable.
+- Functions it invokes.
+- Data it changes.
+- Other features consuming that data.
+- External side effects.
+- Shared dependencies.
+- Potential regression paths.
+
+Identify:
+
+- Circular dependencies.
+- High-coupling modules.
+- Critical shared functions.
+- Single points of failure.
+- Hidden side effects.
+- Shared mutable state.
+- Unexpected cross-module interactions.
+
+Create a change impact map for critical functions and workflows.
+
+Where static analysis cannot establish runtime relationships, clearly mark the dependency as inferred or requiring runtime verification.
+
+Deliver:
+
+DEPENDENCY_GRAPH.md
+
+CRITICAL_FUNCTION_IMPACT_MAP.md
+
+MODULE_COUPLING_REPORT.md
+
+CHANGE_RISK_REGISTER.md
+
+15. PHASE 10 — COMPLETE PROFESSIONAL STANDARDS AUDIT
+
+This is not a limited code review.
+
+Evaluate the entire application against appropriate professional engineering standards.
+
+Investigate anything that is below reasonable professional standards, including problems not explicitly listed in this prompt.
+
+Assess:
+
+Architecture standards
+
+- Separation of concerns.
+- Modularity.
+- Dependency management.
+- Architectural consistency.
+- Scalability.
+- Extensibility.
+- Maintainability.
+
+Coding standards
+
+- Naming consistency.
+- Readability.
+- Complexity.
+- Duplication.
+- Error handling.
+- Type safety.
+- Defensive programming.
+- Reusability.
+- Documentation.
+- Testability.
+
+Security standards
+
+- OWASP applicable guidance.
+- Authentication.
+- Authorization.
+- Session security.
+- Input validation.
+- Output encoding.
+- Injection vulnerabilities.
+- CSRF.
+- XSS.
+- SSRF.
+- File upload security.
+- Secret management.
+- Dependency vulnerabilities.
+- Security logging.
+- Data protection.
+
+Use the applicable OWASP Top 10 and relevant ASVS controls where appropriate. Identify the edition and assessment scope.
+
+Database standards
+
+- Normalization where appropriate.
+- Integrity.
+- Indexing.
+- Transactions.
+- Migration discipline.
+- Backup and recovery.
+- Concurrency control.
+
+Frontend standards
+
+- Accessibility.
+- Responsive design.
+- Consistent interaction patterns.
+- Semantic structure.
+- Performance.
+- Error feedback.
+- Browser compatibility where applicable.
+
+Use WCAG 2.2 AA as a reference target where applicable.
+
+API standards
+
+- Consistent contracts.
+- Versioning.
+- Validation.
+- Authentication.
+- Error handling.
+- Pagination.
+- Rate limiting.
+- Documentation.
+
+Performance standards
+
+- Response times.
+- Database efficiency.
+- Resource consumption.
+- Caching.
+- Memory management.
+- Concurrency.
+- Asset optimization.
+
+Reliability standards
+
+- Fault tolerance.
+- Graceful degradation.
+- Retry policies.
+- Timeouts.
+- Observability.
+- Recovery.
+- Backup verification.
+- Disaster recovery.
+
+DevOps standards
+
+- Reproducible builds.
+- CI/CD.
+- Environment separation.
+- Deployment safety.
+- Configuration management.
+- Infrastructure security.
+- Monitoring.
+- Rollback mechanisms.
+
+Software testing standards
+
+- Unit testing.
+- Integration testing.
+- API testing.
+- End-to-end testing.
+- Regression testing.
+- Security testing.
+- Database testing.
+- Test isolation.
+
+Product and usability standards
+
+- Navigation consistency.
+- User feedback.
+- Accessibility.
+- Form usability.
+- Error messages.
+- Empty states.
+- Loading states.
+- Design consistency.
+- Mobile usability.
+
+Do not automatically mark every deviation from a guideline as a defect.
+
+For each standard, explain:
+
+- What the standard expects.
+- Whether it applies to this application.
+- What the actual implementation does.
+- What evidence supports the assessment.
+- Whether the gap creates meaningful risk.
+- What a suitable improvement would look like.
+
+Use current standards where possible. Record their edition or version and avoid claiming formal certification or compliance from a source-code inspection alone.
+
+Deliver:
+
+PROFESSIONAL_STANDARDS_ASSESSMENT.md
+
+SECURITY_AUDIT.md
+
+CODE_QUALITY_AUDIT.md
+
+PERFORMANCE_AUDIT.md
+
+RELIABILITY_AUDIT.md
+
+ACCESSIBILITY_AUDIT.md
+
+DEVOPS_AUDIT.md
+
+TESTING_MATURITY_AUDIT.md
+
+16. PHASE 11 — IDENTIFY EVERYTHING THAT IS WRONG OR BELOW STANDARD
+
+You must actively search for problems beyond the predefined categories.
+
+Examples include:
+
+- Features that look implemented but are not functional.
+- Buttons without real functionality.
+- Forms that silently discard data.
+- APIs that are not connected to the frontend.
+- Duplicate business logic.
+- Contradictory calculations.
+- Missing database constraints.
+- Unhandled exceptions.
+- Security weaknesses.
+- Incorrect permissions.
+- Broken workflows.
+- Race conditions.
+- Data inconsistency.
+- Incomplete migrations.
+- Dead code.
+- Abandoned modules.
+- Unnecessary dependencies.
+- Poor error messages.
+- Missing observability.
+- Inadequate backups.
+- Poor deployment practices.
+- Unmaintainable architecture.
+- Inconsistent UI.
+- Hidden operational dependencies.
+- Missing documentation.
+- Incorrect assumptions embedded in code.
+- Features that work only under ideal conditions.
+
+Do not stop after finding the first serious problems.
+
+Continue investigating until the available repository and accessible environments have been systematically examined.
+
+If something cannot be verified, record it as an investigation gap instead of pretending it is correct.
+
+17. PHASE 12 — TESTING AND RUNTIME VERIFICATION
+
+Inspect existing tests and determine what they actually cover.
+
+Classify:
+
+- Existing tests.
+- Missing tests.
+- Weak tests.
+- Duplicated tests.
+- Flaky tests.
+- Tests that do not assert meaningful outcomes.
+- Tests that require external services.
+- Tests that may affect real data.
+
+Only execute safe tests.
+
+Before running tests:
+
+1. Inspect the test configuration.
+2. Identify database targets.
+3. Identify external service dependencies.
+4. Identify scripts that could mutate state.
+5. Confirm isolation from production.
+6. Use temporary databases or isolated environments where possible.
+
+Do not execute destructive test suites.
+
+If the application cannot safely be started, document why.
+
+Never fabricate:
+
+- Test execution.
+- Coverage percentages.
+- Performance results.
+- Security scan results.
+- Runtime verification.
+
+Clearly distinguish:
+
+STATICALLY INSPECTED
+
+TESTED IN ISOLATION
+
+RUNTIME VERIFIED
+
+NOT VERIFIED
+
+BLOCKED
+
+Deliver:
+
+TEST_COVERAGE_REPORT.md
+
+RUNTIME_VERIFICATION_REPORT.md
+
+18. PHASE 13 — FINDINGS AND SEVERITY CLASSIFICATION
+
+Every identified issue must receive a unique ID.
+
+Use this format:
+
+AUDIT-001
+AUDIT-002
+AUDIT-003
+
+Classify severity:
+
+CRITICAL:
+Potential severe security compromise, data loss, or major operational failure.
+
+HIGH:
+Major security, functional, architectural, reliability, or data integrity issue.
+
+MEDIUM:
+Meaningful quality, performance, maintainability, or operational weakness.
+
+LOW:
+Minor issue with limited impact.
+
+OPTIMIZATION:
+Improvement opportunity rather than a verified defect.
+
+Each finding must contain:
+
+- Finding ID.
+- Title.
+- Category.
+- Severity.
+- Confidence.
+- Exact location.
+- File path.
+- Function/class/endpoint/table.
+- Relevant line numbers.
+- Evidence.
+- Current behavior.
+- Expected professional behavior.
+- Root cause.
+- Technical consequences.
+- Business consequences.
+- Affected modules.
+- Direct dependencies.
+- Indirect dependencies.
+- Recommended solution.
+- Alternative approaches.
+- Implementation complexity.
+- Risk of implementation.
+- Required tests.
+- Acceptance criteria.
+- Rollback strategy.
+
+Confidence levels:
+
+CONFIRMED:
+Directly established through implementation or reproducible evidence.
+
+STRONGLY INDICATED:
+Strong evidence exists, but complete verification is unavailable.
+
+POTENTIAL:
+A credible risk requiring further investigation.
+
+UNKNOWN:
+Insufficient evidence.
+
+Never present assumptions as confirmed defects.
+
+19. PHASE 14 — MODERNIZATION AND IMPROVEMENT BLUEPRINT
+
+After completing the audit, prepare a professional modernization plan.
+
+Do not immediately recommend rewriting the entire application.
+
+First evaluate whether existing architecture can be improved incrementally.
+
+For every proposed improvement explain:
+
+1. Current situation.
+2. Identified problem.
+3. Recommended target state.
+4. Why the target state is better.
+5. Alternative solutions.
+6. Advantages and disadvantages.
+7. Affected files and modules.
+8. Dependencies.
+9. Database implications.
+10. API implications.
+11. Frontend implications.
+12. Security implications.
+13. Performance implications.
+14. Regression risks.
+15. Implementation phases.
+16. Required tests.
+17. Acceptance criteria.
+18. Rollback strategy.
+
+Consider:
+
+- Incremental improvements.
+- Modularization.
+- Architectural boundary corrections.
+- Database improvements.
+- API standardization.
+- Security hardening.
+- Performance optimization.
+- UI/UX modernization.
+- Automated testing.
+- CI/CD improvements.
+- Monitoring.
+- Backup and recovery.
+- Documentation.
+- Developer experience.
+
+Recommend microservices only when measurable requirements justify their operational and architectural cost.
+
+Do not recommend technology migrations merely because a technology is popular.
+
+Deliver:
+
+MODERNIZATION_MASTER_PLAN.md
+
+TECHNICAL_ROADMAP.md
+
+RECOMMENDATION_REGISTER.md
+
+20. PHASE 15 — PRIORITIZED IMPLEMENTATION ROADMAP
+
+Divide improvements into:
+
+P0 — Immediate critical risks.
+
+P1 — High-priority correctness, security, and reliability problems.
+
+P2 — Structural and architectural improvements.
+
+P3 — Performance, maintainability, and usability improvements.
+
+P4 — Optional enhancements and optimization.
+
+Also identify dependencies between improvements.
+
+For example:
+
+Database integrity correction
+must happen before
+Financial workflow refactoring.
+
+Testing infrastructure
+must be established before
+High-risk module replacement.
+
+Do not propose an implementation order that ignores dependencies.
+
+For each phase estimate complexity, required expertise, testing effort, and expected risk.
+
+Avoid false precision in time estimates.
+
+Deliver:
+
+PRIORITY_MATRIX.md
+
+IMPLEMENTATION_SEQUENCE.md
+
+21. PHASE 16 — MASTER APPLICATION HANDBOOK
+
+Consolidate all findings into a permanent technical knowledge base.
+
+Recommended structure:
+
+APPLICATION_AUDIT/
+│
+├── 00_MASTER_EXECUTIVE_SUMMARY.md
+├── 01_INVESTIGATION_STATUS.md
+├── 02_REPOSITORY_BASELINE.md
+├── 03_COMPLETE_FILE_INVENTORY.md
+├── 04_GIT_AND_PR_HISTORY.md
+├── 05_ARCHITECTURE/
+│   ├── ARCHITECTURE_REPORT.md
+│   ├── SYSTEM_DIAGRAM.md
+│   ├── FRONTEND_BACKEND_MAP.md
+│   ├── SERVICE_COMMUNICATION.md
+│   └── DEPLOYMENT_DIAGRAM.md
+│
+├── 06_FRONTEND/
+├── 07_BACKEND/
+├── 08_DATABASE/
+├── 09_APIS_AND_INTEGRATIONS/
+├── 10_BUSINESS_WORKFLOWS/
+├── 11_DEPENDENCY_AND_IMPACT/
+├── 12_SECURITY/
+├── 13_PERFORMANCE/
+├── 14_RELIABILITY/
+├── 15_CODE_QUALITY/
+├── 16_TESTING/
+├── 17_DEVOPS/
+├── 18_UX_AND_ACCESSIBILITY/
+├── 19_FINDINGS_REGISTER/
+├── 20_MODERNIZATION_PLAN/
+├── 21_IMPLEMENTATION_ROADMAP/
+├── 22_UNKNOWN_AND_UNVERIFIED_AREAS/
+└── MASTER_SYSTEM_INDEX.md
+
+The handbook must be navigable.
+
+Include cross-references between files, modules, functions, APIs, database objects, workflows, and findings.
+
+Use stable IDs for findings and important architectural components.
+
+Do not duplicate large sections of content unnecessarily.
+
+22. INVESTIGATION PROGRESS AND RECOVERY
+
+Maintain:
+
+INVESTIGATION_PROGRESS.md
+
+This file must include:
+
+- Current phase.
+- Completed phases.
+- Current investigation unit.
+- Inspected directories.
+- Inspected files.
+- Uninspected files.
+- Completed findings.
+- Pending findings.
+- Blocked investigations.
+- Evidence references.
+- Next exact actions.
+- Last verified commit hash.
+- Last investigation update.
+
+At the end of every work session, update the progress file.
+
+When resuming:
+
+1. Read the progress file.
+2. Verify the current commit and working tree.
+3. Identify what has already been investigated.
+4. Continue from the first incomplete task.
+5. Do not repeat completed work unless new evidence requires verification.
+
+If context limits are reached, preserve progress rather than generating an incomplete final report.
+
+23. QUALITY CONTROL AND ANTI-HALLUCINATION RULES
+
+These rules are mandatory.
+
+- Every important conclusion must have evidence.
+- Use real paths, symbols, and line numbers.
+- Verify that referenced files exist.
+- Verify that referenced functions exist.
+- Verify that referenced APIs exist.
+- Verify database claims against actual schemas or models.
+- Verify architectural claims against actual communication paths.
+- Cross-check important findings from multiple sources.
+- Distinguish static evidence from runtime evidence.
+- Record uncertainty.
+- Record inaccessible repository areas.
+- Record unavailable PR history.
+- Do not assume missing code is necessarily missing functionality.
+- Do not infer successful runtime behavior from static code.
+- Do not invent user requirements.
+- Do not inflate issue severity.
+- Do not hide serious problems to make the project look better.
+- Do not generate enormous reports full of generic recommendations.
+
+Every recommendation must relate to an actual finding or an explicitly identified improvement opportunity.
+
+If a tool cannot inspect something, state the limitation.
+
+24. FINAL ACCEPTANCE REQUIREMENTS
+
+The investigation is not complete until:
+
+1. Repository identity and baseline are recorded.
+2. Accessible Git history and PR records are assessed.
+3. Actual architecture is identified with evidence.
+4. Relevant project files are inventoried.
+5. Frontend structure is documented.
+6. Backend structure is documented.
+7. Database architecture is documented.
+8. API and integration catalogue is documented.
+9. Business workflows are mapped.
+10. Critical dependencies are mapped.
+11. Professional standards assessment is completed.
+12. Security risks are documented.
+13. Performance risks are documented.
+14. Reliability risks are documented.
+15. Testing maturity is assessed.
+16. Runtime verification limitations are recorded.
+17. All discovered findings are registered.
+18. Every important finding has a proposed solution.
+19. Modernization roadmap is prepared.
+20. Unknown and unverified areas are explicitly listed.
+21. Master handbook is navigable.
+22. Investigation progress is recoverable.
+23. The original application remains unmodified.
+
+If any requirement is blocked, explain the blocker and what is needed to complete it.
+
+25. FINAL EXECUTIVE REPORT
+
+At the conclusion, prepare a concise but evidence-backed executive report for Ahmed.
+
+It must answer:
+
+1. What exactly is this application?
+2. What does it do?
+3. What is its actual architecture?
+4. What technologies does it use?
+5. How does its frontend work?
+6. How does its backend work?
+7. How does its database work?
+8. How do its APIs communicate?
+9. What are its main business workflows?
+10. What are its most important functions?
+11. Which functions and modules affect other parts?
+12. What is implemented and what remains incomplete?
+13. What is technically good?
+14. What is below professional standards?
+15. What is insecure?
+16. What is inefficient?
+17. What is unnecessarily complicated?
+18. What could break?
+19. What must be fixed first?
+20. What should be improved later?
+21. What should not be changed?
+22. What is still unknown?
+23. What is the recommended long-term architecture?
+24. What is the safest path to professional-quality software?
+
+Include:
+
+- Critical findings count.
+- High findings count.
+- Medium findings count.
+- Low findings count.
+- Optimization opportunities count.
+- Investigation coverage.
+- Unverified areas.
+- Top ten recommended actions.
+- Recommended implementation sequence.
+
+Do not invent numerical scores or percentages without a defined measurement method and sufficient evidence.
+
+26. FINAL INSTRUCTION
+
+Begin with PHASE 0.
+
+Do not jump directly into recommendations.
+
+Do not modify application source code.
+
+Do not implement fixes.
+
+Do not redesign the application.
+
+Do not start a rewrite.
+
+First understand the existing system completely.
+
+Then investigate its weaknesses against applicable professional standards.
+
+Then produce evidence-based solutions.
+
+Then prepare the modernization roadmap.
+
+The objective is not to make the application look modern. The objective is to make it genuinely correct, secure, reliable, maintainable, understandable, efficient, scalable where required, and professionally engineered.
+
+Work carefully. Verify everything. Preserve existing functionality.
+
+OWNER: AHMED
+
+MISSION STATUS: AUTHORIZED FOR READ-ONLY INVESTIGATION ONLY.
+
+APPLICATION CODE MODIFICATION: STRICTLY PROHIBITED UNTIL SEPARATE EXPLICIT APPROVAL.

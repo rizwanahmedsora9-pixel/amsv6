@@ -1,0 +1,206 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="container py-4">
+    <div class="row justify-content-center">
+        <div class="col-md-8 col-lg-6">
+            <div class="card border-warning bg-dark shadow-sm mb-0" style="border-radius: 14px;">
+                <div class="card-header bg-transparent border-warning py-3">
+                    <h5 class="fw-bold text-warning mb-0"><i class="bi bi-file-earmark-text me-2"></i>Urdu Receipt — Print Options</h5>
+                    <div class="small text-white-50 mt-1">Bill: <bdi dir="ltr">{{ bill_no }}</bdi></div>
+                </div>
+                <div class="card-body p-4">
+                    <form method="GET"
+                          action="{{ url_for('download_invoice', bill_no=bill_no) }}">
+                        <input type="hidden" name="lang" value="ur">
+                        {% if action %}<input type="hidden" name="action" value="{{ action }}">{% endif %}
+                        {% if src %}<input type="hidden" name="src" value="{{ src }}">{% endif %}
+                        {% if src_id %}<input type="hidden" name="src_id" value="{{ src_id }}">{% endif %}
+                        {% if client_code %}<input type="hidden" name="client_code" value="{{ client_code }}">{% endif %}
+                        {% if client_name %}<input type="hidden" name="client_name" value="{{ client_name }}">{% endif %}
+                        {% if entry_id %}<input type="hidden" name="entry_id" value="{{ entry_id }}">{% endif %}
+                        <p class="text-white small mb-3">
+                            <bdi dir="rtl" class="fw-bold">شرائط و ضوابط:</bdi> Display Terms &amp; Conditions on this Urdu receipt?
+                        </p>
+
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="radio" name="tc" id="tcYes" value="1" checked>
+                            <label class="form-check-label text-white fw-bold" for="tcYes">
+                                <i class="bi bi-check-circle text-success me-1"></i> Yes — show terms and conditions
+                            </label>
+                        </div>
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="radio" name="tc" id="tcNo" value="0">
+                            <label class="form-check-label text-white-50" for="tcNo">
+                                <i class="bi bi-dash-circle text-muted me-1"></i> No — print without terms
+                            </label>
+                        </div>
+
+                        <div class="mb-3 border rounded p-3 bg-dark-subtle">
+                            <div class="small text-warning fw-bold text-uppercase mb-2">
+                                <i class="bi bi-copy me-1"></i> Copies
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="copies" id="copies2" value="2"
+                                       {% if copies == 2 %}checked{% endif %}>
+                                <label class="form-check-label text-white fw-bold" for="copies2">
+                                    <bdi dir="rtl">کاربن کاپی</bdi> — 2 copies on one A4 (carbon copy)
+                                </label>
+                                <div class="text-white-50 small">
+                                    <bdi dir="rtl">اصل</bdi> for the customer on the right,
+                                    <bdi dir="rtl">نقل</bdi> for the office on the left.
+                                </div>
+                            </div>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="radio" name="copies" id="copies1" value="1"
+                                       {% if copies != 2 %}checked{% endif %}>
+                                <label class="form-check-label text-white-50" for="copies1">
+                                    <i class="bi bi-file-earmark me-1"></i> Single copy — one A5 sheet
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="mb-3 border rounded p-3 bg-dark-subtle">
+                            <div class="small text-warning fw-bold text-uppercase mb-1">
+                                <i class="bi bi-arrow-left-right me-1"></i> Alternative material name
+                            </div>
+                            <div class="text-white-50 small mb-2">
+                                Only matters when an alternative material was delivered against a booking.
+                                Changes the printed name only.
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="alt_name" id="altBooked" value="booked">
+                                <label class="form-check-label text-white" for="altBooked">
+                                    Booked item name only
+                                </label>
+                            </div>
+                            <div class="form-check mt-1">
+                                <input class="form-check-input" type="radio" name="alt_name" id="altDelivered" value="delivered">
+                                <label class="form-check-label text-white" for="altDelivered">
+                                    Delivered item name only
+                                </label>
+                            </div>
+                            <div class="form-check mt-1">
+                                <input class="form-check-input" type="radio" name="alt_name" id="altBoth" value="both" checked>
+                                <label class="form-check-label text-white fw-bold" for="altBoth">
+                                    Both — delivered <bdi dir="rtl">(بجائے booked)</bdi>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div id="tcOptions" class="mb-3 border rounded p-3 bg-dark-subtle">
+                            <div class="small text-warning fw-bold text-uppercase mb-2">
+                                <i class="bi bi-menu-button-wide me-1"></i> Choose terms to display (Urdu receipt only)
+                            </div>
+                            <div class="list-group list-group-flush small">
+                                {% for term in terms %}
+                                <div class="list-group-item bg-dark text-white border-secondary py-2">
+                                    <input class="form-check-input mt-1" type="checkbox" name="tc_ids"
+                                           value="{{ term.id }}" id="tc-{{ term.id }}" checked>
+                                    <label class="form-check-label fw-bold d-block mb-1" for="tc-{{ term.id }}">
+                                        {{ term.title }}
+                                    </label>
+                                    {% if term.content_ur %}
+                                    <div class="text-white-75"><bdi dir="rtl">{{ term.content_ur }}</bdi></div>
+                                    {% endif %}
+                                </div>
+                                {% else %}
+                                <div class="list-group-item bg-dark text-white-50 border-secondary py-2">
+                                    No terms configured yet. Add them in Settings &rarr; Terms &amp; Conditions.
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+
+                        <div class="mb-3 border rounded p-3 bg-dark-subtle">
+                            <div class="small text-warning fw-bold text-uppercase mb-1">
+                                <i class="bi bi-map me-1"></i> Page map — tick what prints
+                            </div>
+                            <div class="text-white-50 small mb-2">
+                                Every mark on the receipt is listed in page order and is on by default.
+                                Untick anything to leave it off this receipt only.
+                            </div>
+                            {% set section_groups = [
+                                ('1 · Header', [
+                                    ('qr', 'QR code', 'بارکوڈ'),
+                                    ('company', 'Shop name', 'دکان کا نام'),
+                                    ('address', 'Address', 'پتہ'),
+                                    ('proprietor', 'Proprietor', 'پروپرائٹر'),
+                                    ('phones', 'Phone numbers', 'فون'),
+                                    ('note', 'Shop note', 'سامان کی معلومات')]),
+                                ('2 · Date / time strip', [
+                                    ('meta_time', 'Time', 'وقت'),
+                                    ('meta_date', 'Date', 'تاریخ'),
+                                    ('meta_type', 'Type', 'قسم'),
+                                    ('meta_bill', 'Bill number', 'بل نمبر')]),
+                                ('3 · Client panel', [
+                                    ('party', 'Client name', 'گاہک'),
+                                    ('ref', 'Reference / phone', 'حوالہ'),
+                                    ('code', 'Client code', 'کوڈ'),
+                                    ('delivery', 'Delivery Person', 'ڈیلیوری پرسن'),
+                                    ('account', 'Account / bank', 'اکاؤنٹ'),
+                                    ('method', 'Payment method', 'ادائیگی')]),
+                                ('4 · Items table', [
+                                    ('items', 'Items table', 'آئٹمز کی فہرست'),
+                                    ('items_title', 'Heading', 'ٹرانزیکشن کی تفصیلات'),
+                                    ('items_note', 'Prices note', 'قیمتیں روپے میں'),
+                                    ('col_index', 'No. column', 'نمبر'),
+                                    ('col_name', 'Item column', 'تفصیل'),
+                                    ('col_qty', 'Qty column', 'مقدار'),
+                                    ('col_rate', 'Rate column', 'ریٹ'),
+                                    ('col_amount', 'Amount column', 'رقم')]),
+                                ('5 · Summary box', [
+                                    ('sum_total_sales', 'Total sales', 'کل فروخت'),
+                                    ('prev', 'Previous balance', 'پچھلا بقایا'),
+                                    ('sum_discount', 'Discount', 'رعایت'),
+                                    ('sum_paid', 'Paid', 'ادا شدہ رقم'),
+                                    ('sum_total', 'Total balance', 'کل بقایا رقم'),
+                                    ('sum_received', 'Received', 'وصول شدہ رقم'),
+                                    ('sum_balance', 'Balance after', 'بقایا رقم')]),
+                                ('6 · Booked sale summary', [
+                                    ('booked_summary', 'Booked sale summary', 'بک شدہ فروخت کا خلاصہ')]),
+                                ('7 · Footer', [
+                                    ('sig', 'Signature line', 'دستخط')])
+                            ] %}
+                            {% for group_name, group_items in section_groups %}
+                            <div class="mb-2">
+                                <div class="small text-info fw-bold text-uppercase border-bottom border-secondary pb-1 mb-1">
+                                    {{ group_name }}
+                                </div>
+                                <div class="row g-2">
+                                    {% for key, label, urdu in group_items %}
+                                    <div class="col-sm-6">
+                                        <div class="form-check">
+                                            {# A hidden 0 plus the checked 1: an unchecked box still
+                                               posts an explicit "off" instead of being dropped. #}
+                                            <input type="hidden" name="{{ key }}" value="0">
+                                            <input class="form-check-input" type="checkbox"
+                                                   name="{{ key }}" value="1" id="sec-{{ key }}" checked>
+                                            <label class="form-check-label text-white" for="sec-{{ key }}">
+                                                {{ label }}
+                                                <span class="text-white-50">(<bdi dir="rtl">{{ urdu }}</bdi>)</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-4">
+                            <a href="{{ url_for('view_bill', bill_no=bill_no) }}" class="btn btn-outline-light btn-sm">
+                                <i class="bi bi-x-lg me-1"></i> Cancel
+                            </a>
+                            <button type="submit" class="btn btn-warning btn-sm fw-bold">
+                                {% if action == 'print' %}<i class="bi bi-printer me-1"></i> Print Urdu Receipt
+                                {% else %}<i class="bi bi-file-earmark-pdf me-1"></i> Download Urdu PDF
+                                {% endif %}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

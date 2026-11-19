@@ -1,0 +1,83 @@
+FIX + VERIFICATION SUMMARY — AMS v5.2, ROUND 3 (2026-11-18)
+===========================================================
+
+WHAT WAS DONE
+  Every one of the 14 findings from the round-2 audit was repaired in the build under audit
+  (/home/user/AMSV5-2_FIXED) and then re-audited with the SAME 86-test suite.
+  The as-found code (AUDIT_2026-11-18/r2/app_under_test) was left untouched, so the evidence of
+  what was wrong still stands next to the proof that it is fixed.
+
+  As found (r2):   73 PASS / 13 FAIL
+  After the fixes: 86 PASS /  0 FAIL
+  Route sweep:     313 GET routes, 272 rendered, 35 x 404 (missing entity id), 0 errors
+
+THE 14 FINDINGS -> ALL CLOSED
+  F-R2-01 HIGH    supplier payment now allocated oldest-bill-first; paying 160,000 on a 100,000
+                  balance is refused ("exceeds the remaining payable 100,000.00")
+  F-R2-02 HIGH    voiding a bill reverses its returns: stock 320 -> 500 (physical), client owed
+                  exactly 35,000 instead of 38,200
+  F-R2-03 HIGH    expense vouchers void properly (money back, document kept); root cause was TWO
+                  broken links: the account_transaction FK and the NOT NULL audit FK
+  F-R2-04 HIGH    anonymous GET /logs -> 302 /login instead of a 500
+  F-R2-05 HIGH    an account with no permissions gets a 403 page naming the missing permission
+  F-R2-06 HIGH    a part-paid counter sale to a walk-in name creates the client master, so
+                  Current Payables shows the 3,000 instead of 0
+  F-R2-07 MEDIUM  cancelled booking lines are kept (qty 0 + cancelled_qty), never deleted
+  F-R2-08 MEDIUM  a non-numeric opening balance is refused; the client is not created
+  F-R2-09 MEDIUM  the P&L workbook now states the revenue its net profit is computed from
+  F-R2-10 MEDIUM  /stock_summary shows Value at Cost + a total (117,665.62 + 61,736.25 live)
+  F-R2-11 MEDIUM  dashboard tile renamed "Net Client Dues" and states the 17,500 of open bills
+  F-R2-12 LOW     delivery costed from real GRN lots is "recorded", not "estimated"
+                  (estimated_cost_rows 2 -> 0; COGS and net unchanged)
+  F-R2-13 INFO    PDF export: deployment note only (requirements-pdf.txt), no code defect
+  F-R2-14 INFO    booking cancel is client-wide LIFO by design — not changed, now documented
+
+WHAT CHANGED IN THE CODE
+  20 files, 849 diff lines:  FIXES_2026-11-18_R3.patch   (text patch, applies with `patch -p1`)
+  Two additive columns, created on boot by an idempotent migration:
+     booking_item.cancelled_qty          (keeps the ordered quantity on a cancelled line)
+     material_return.voided_with_sale    (lets a restored bill restore exactly its own returns)
+  No column dropped, renamed or re-typed; no row rewritten.
+
+MONEY IS UNCHANGED, ONLY CLEARER
+  Gross 39,500 / discounts 500 / net revenue 39,000 / COGS 25,468.75 / net profit 10,031.25 —
+  still exact to the paisa, and the workbook can now reproduce them itself.
+  Cash ties, stock ties, payables split (supplier 144,000 + third-party 7,000 = 151,000) and
+  supplier ledgers equal the payables page to the rupee.
+
+WHAT A USER WILL NOTICE
+  1. Pay Supplier reduces what Pay GRN offers, and overpaying is refused with the amount.
+  2. Voiding a bill also voids its returns; restoring the bill restores them.
+  3. Voided expenses stay visible, marked void, with an audit trail.
+  4. Part-paid walk-in sales create a client record (WC-<NAME>).
+  5. A brand-new user sees "This account has no access yet" instead of a redirect loop.
+  6. Stock Summary shows what the stock is worth; the dashboard says what its dues figure means.
+  7. Boss-level: nothing else changes; every figure is computed exactly as before.
+
+STILL OPEN (deliberately)
+  Concurrency (two operators at the same instant) is untested; the 39 destructive routes
+  (wipe/restore/migrate) were inventoried and never invoked; legacy supplier-level vouchers are
+  now allocated FIFO, which a shop using "Pay Supplier" as a pure advance account should re-check.
+
+DEPLOY
+  patch -p1 --dry-run -i FIXES_2026-11-18_R3.patch   # must print no failures
+  patch -p1        -i FIXES_2026-11-18_R3.patch
+  # take a database backup first: the two new columns are added on first boot.
+
+  The production database /home/user/AMSV5-2/instance/ahmed_cement_v44_fresh.db was NEVER
+  opened for writing — md5 still 124f7a31809e32061d370f7c93e2d7d4.
+
+REPRODUCE
+  cd /home/user/AUDIT_2026-11-18/r3
+  bash tools/run_chain.sh s1_masters s2_purchases s3_supplier_payments s4_bookings s5_sales \
+       s6_accounts s7_recon s8_register s9_security s10_regressions     # ~42 s
+  python3 tools/r2_sweep.py                                            # 313 GETs, 0 errors
+
+ARTEFACTS (AUDIT_2026-11-18/r3/)
+  VERIFICATION_2026-11-18_R3.md          full report: what changed, why, and the proof
+  FIXES_2026-11-18_R3.patch              the patch (20 files)
+  BUG_REGISTER_2026-11-18_R3_FIXED.csv   the 14 findings + "Status after fix"
+  TEST_RESULTS_2026-11-18_R3.csv         86 tests, all PASS, expected vs actual
+  evidence/results.json                  machine-readable result ledger
+  evidence/routes_sweep.json             313 GET routes, 0 errors
+  app_under_test/ , test_db/audit_test.db   the patched build and the data behind the numbers

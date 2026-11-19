@@ -1,0 +1,302 @@
+/* =========================================================================
+   GRN charge grid — operator-driven, never pre-filled.
+
+   Owner rule: a charge line exists ONLY because the operator pressed
+   "Add charge" (or because it is already saved on the GRN being edited).
+   The screen must never invent Vehicle Fare / Loading / Unloading / Other
+   rows on its own.  So:
+
+     * the server renders zero rows for a new GRN;
+     * "Add charge" clones the inert <template id="grnChargeRowTemplate">,
+       never a visible row, so a new line starts blank;
+     * every row is removable, including the last one — an empty grid is a
+       valid GRN whose cost is the supplier material only;
+     * an empty grid still posts ``charge_grid_present`` so the server can
+       tell "no charges" from "this form has no charge grid".
+
+   A charge line carries cost facts only: type, label, amount, recipient,
+   cost treatment, allocation basis and its own supplier-billing choice.
+   It deliberately has no paid/unpaid field — payment state belongs to Accounts (Pay GRN Expenses), never to a
+   receiving document.
+
+   This module owns the rows only.  All money arithmetic still comes from
+   app/services/grn_costing.py on the server; the live figure here is a
+   preview built from the same rule (INVENTORY charges, minus the ones
+   declared Not Applicable) and is replaced by the server's numbers on save.
+   ========================================================================= */
+(function () {
+    "use strict";
+
+    var TABLE_SELECTOR = "#grnChargesTable";
+    var ROW_SELECTOR = "tr.grn-charge-row";
+    var BODY_ID = "grnChargesBody";
+    var TEMPLATE_ID = "grnChargeRowTemplate";
+    var WRAP_ID = "grnChargesWrap";
+    var EMPTY_ID = "grnChargesEmpty";
+    var ADD_BTN_ID = "addGrnChargeBtn";
+
+    /* Mirrors DEFAULT_RECIPIENT_BY_CHARGE in app/services/grn_costing.py. */
+    var RECIPIENT_BY_CHARGE = {
+        VEHICLE_FARE: "TRANSPORTER",
+        TRANSPORT: "TRANSPORTER",
+        LOADING: "LABOUR",
+        UNLOADING: "LABOUR",
+        OTHER: "OTHER"
+    };
+
+    var onChange = null;
+    var notifyEnabled = true;
+    var nextRowKey = 1;
+
+    function byId(id) {
+        return document.getElementById(id);
+    }
+
+    function body() {
+        return byId(BODY_ID) || document.querySelector(TABLE_SELECTOR + " tbody");
+    }
+
+    function rows() {
+        var host = body();
+        if (!host) return [];
+        return Array.prototype.slice.call(host.querySelectorAll(ROW_SELECTOR));
+    }
+
+    function rowCount() {
+        return rows().length;
+    }
+
+    function field(row, name) {
+        return row.querySelector('[name="' + name + '"]');
+    }
+
+    function valueOf(row, name) {
+        var el = field(row, name);
+        return el ? String(el.value === undefined || el.value === null ? "" : el.value).trim() : "";
+    }
+
+    /* Unchecked boxes submit nothing.  A hidden key travels with every row;
+       selected keys identify exactly which expenses the operator chose. */
+    function ensureRowKey(row) {
+        var keyField = field(row, "charge_row_key[]");
+        var checkbox = field(row, "charge_include_in_supplier[]");
+        if (!keyField) return;
+        if (!keyField.value) keyField.value = "new-" + nextRowKey++;
+        if (checkbox) checkbox.value = keyField.value;
+    }
+
+    function recipientForCharge(chargeType) {
+        return RECIPIENT_BY_CHARGE[chargeType] || "OTHER";
+    }
+
+    function num(value) {
+        var parsed = parseFloat(String(value === undefined || value === null ? "" : value).replace(/,/g, ""));
+        return isFinite(parsed) ? parsed : 0;
+    }
+
+    function notify() {
+        if (notifyEnabled && typeof onChange === "function") onChange();
+    }
+
+    /* The table is on screen only while it has rows.  With no charges the
+       operator reads one sentence instead of staring at an empty grid. */
+    function syncVisibility() {
+        var hasRows = rowCount() > 0;
+        var wrap = byId(WRAP_ID);
+        var empty = byId(EMPTY_ID);
+        if (wrap) wrap.hidden = !hasRows;
+        if (empty) empty.hidden = hasRows;
+        return hasRows;
+    }
+
+    /* Capitalised preview: material-cost charges only.  There is no
+       paid/unpaid field on a charge any more — money moves only in Accounts,
+       so payment state can never change the cost. */
+    function supplierBilledTotal() {
+        var total = 0;
+        rows().forEach(function (row) {
+            var amount = num(valueOf(row, "charge_amount[]"));
+            var treatment = (valueOf(row, "charge_treatment[]") || "INVENTORY").toUpperCase();
+            var status = (valueOf(row, "charge_status[]") || "UNPAID").toUpperCase();
+            var selected = field(row, "charge_include_in_supplier[]");
+            if (selected && selected.checked && amount > 0 && status !== "NOT_APPLICABLE" && treatment !== "NON_MATERIAL" && treatment !== "UNTRACKED_LEGACY") total += amount;
+        });
+        return total;
+    }
+
+    function capitalisedTotal() {
+        var total = 0;
+        rows().forEach(function (row) {
+            var amount = num(valueOf(row, "charge_amount[]"));
+            if (!amount) return;
+            var treatment = valueOf(row, "charge_treatment[]") || "INVENTORY";
+            if (treatment === "INVENTORY") total += amount;
+        });
+        return total;
+    }
+
+    function bindRow(row) {
+        ensureRowKey(row);
+        Array.prototype.forEach.call(row.querySelectorAll("input, select"), function (el) {
+            if (el.dataset.grnChargeBound) return;
+            el.dataset.grnChargeBound = "1";
+            el.addEventListener("input", notify);
+            el.addEventListener("change", notify);
+        });
+
+        /* Choosing the charge fills the matching recipient type on that same
+           row, unless the operator already picked one.  It fills a field on a
+           row the operator added; it never adds a row. */
+        var typeSel = field(row, "charge_type[]");
+        var recSel = field(row, "charge_recipient_type[]");
+        if (recSel && !recSel.dataset.grnChargeRecipientBound) {
+            recSel.dataset.grnChargeRecipientBound = "1";
+            if (recSel.value) recSel.dataset.grnChargeRecipientChosen = "1";
+            recSel.addEventListener("change", function () {
+                recSel.dataset.grnChargeRecipientChosen = "1";
+            });
+        }
+        if (typeSel && recSel && !typeSel.dataset.grnChargeRecipientBound) {
+            typeSel.dataset.grnChargeRecipientBound = "1";
+            typeSel.addEventListener("change", function () {
+                if (recSel.dataset.grnChargeRecipientChosen) return;
+                recSel.value = recipientForCharge(typeSel.value);
+            });
+        }
+
+        var remove = row.querySelector(".grn-charge-remove");
+        if (remove && !remove.dataset.grnChargeBound) {
+            remove.dataset.grnChargeBound = "1";
+            remove.addEventListener("click", function () {
+                removeRow(row);
+            });
+        }
+    }
+
+    function bindRows() {
+        rows().forEach(bindRow);
+    }
+
+    function addRow() {
+        var host = body();
+        var blueprint = byId(TEMPLATE_ID);
+        if (!host || !blueprint || !blueprint.content) return null;
+        var source = blueprint.content.querySelector(ROW_SELECTOR);
+        if (!source) return null;
+        var clone = source.cloneNode(true);
+        /* The blueprint is inert, but be explicit: a newly added line carries
+           no stored id and no values from any other charge. */
+        Array.prototype.forEach.call(clone.querySelectorAll("input"), function (el) {
+            if (el.type === "checkbox" || el.type === "radio") el.checked = el.defaultChecked;
+            else el.value = el.defaultValue || "";
+            el.removeAttribute("data-grn-charge-bound");
+        });
+        var idField = field(clone, "charge_id[]");
+        if (idField) idField.value = "";
+        var keyField = field(clone, "charge_row_key[]");
+        if (keyField) keyField.value = "";
+        ensureRowKey(clone);
+        Array.prototype.forEach.call(clone.querySelectorAll("select"), function (sel) {
+            sel.removeAttribute("data-grn-charge-bound");
+            sel.removeAttribute("data-grn-charge-recipient-bound");
+            sel.removeAttribute("data-grn-charge-recipient-chosen");
+        });
+        var removeBtn = clone.querySelector(".grn-charge-remove");
+        if (removeBtn) removeBtn.removeAttribute("data-grn-charge-bound");
+        host.appendChild(clone);
+        bindRow(clone);
+        syncVisibility();
+        notify();
+        var first = field(clone, "charge_type[]");
+        if (first && typeof first.focus === "function") first.focus();
+        return clone;
+    }
+
+    function removeRow(row) {
+        if (!row) return false;
+        row.remove();
+        syncVisibility();
+        notify();
+        return true;
+    }
+
+    function isBlank(row) {
+        return !valueOf(row, "charge_type[]")
+            && !valueOf(row, "charge_label[]")
+            && !valueOf(row, "charge_recipient[]")
+            && !valueOf(row, "charge_amount[]");
+    }
+
+    /* Runs on save.  Untouched blank rows are dropped instead of stored; a row
+       that means something must say which charge it is and what it costs.
+       ``alertFn`` is injectable so the DOM test can assert the refusals. */
+    function validate(alertFn) {
+        var warn = typeof alertFn === "function" ? alertFn : function (message) { window.alert(message); };
+        var dropped = 0;
+        rows().forEach(function (row) {
+            if (isBlank(row) && !valueOf(row, "charge_id[]")) {
+                row.remove();
+                dropped += 1;
+            }
+        });
+        if (dropped) syncVisibility();
+
+        var live = rows();
+        for (var i = 0; i < live.length; i += 1) {
+            var row = live[i];
+            var id = valueOf(row, "charge_id[]");
+            var type = valueOf(row, "charge_type[]");
+            var amountRaw = valueOf(row, "charge_amount[]");
+            if (!type) {
+                warn("Charge row " + (i + 1) + ": select the charge (Vehicle Fare, Transportation, Loading, Unloading, Other Expenses), or remove the row.");
+                var sel = field(row, "charge_type[]");
+                if (sel) sel.focus();
+                return false;
+            }
+            if (!amountRaw || num(amountRaw) <= 0) {
+                /* A stored charge may legitimately be zeroed; a brand-new row
+                   may not be saved costless. */
+                if (!id) {
+                    warn("Charge row " + (i + 1) + ": enter the amount, or remove the row.");
+                    var amt = field(row, "charge_amount[]");
+                    if (amt) amt.focus();
+                    return false;
+                }
+            }
+            var recSel = field(row, "charge_recipient_type[]");
+            if (recSel && !recSel.value) recSel.value = recipientForCharge(type);
+        }
+        syncVisibility();
+        notify();
+        return true;
+    }
+
+    function init(options) {
+        options = options || {};
+        if (typeof options.onChange === "function") onChange = options.onChange;
+        var host = body();
+        if (!host) return false;
+        bindRows();
+        var addBtn = byId(ADD_BTN_ID);
+        if (addBtn && !addBtn.dataset.grnChargeBound) {
+            addBtn.dataset.grnChargeBound = "1";
+            addBtn.addEventListener("click", function () { addRow(); });
+        }
+        syncVisibility();
+        return true;
+    }
+
+    window.FBMGrnCharges = {
+        init: init,
+        addRow: addRow,
+        removeRow: removeRow,
+        bindRows: bindRows,
+        rows: rows,
+        rowCount: rowCount,
+        capitalisedTotal: capitalisedTotal,
+        supplierBilledTotal: supplierBilledTotal,
+        recipientForCharge: recipientForCharge,
+        syncVisibility: syncVisibility,
+        validate: validate
+    };
+})();
