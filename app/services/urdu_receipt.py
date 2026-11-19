@@ -27,10 +27,10 @@ with a dashed cut line between them.
 Geometry is written once, in points, as a list of drawing primitives.  Both
 backends consume that list:
 
-* :func:`render_pdf` draws it on a ReportLab canvas (used for "Urdu PDF").
-* :func:`render_html` lays the same primitives out absolutely in an HTML page
-  (used for "Urdu Print"), so the browser preview, the printed sheet and the
-  downloaded PDF are the same page.
+* :func:`render_pdf` draws it on a ReportLab canvas with embedded fonts
+  (used for both "Urdu PDF" and the default "Urdu Print").
+* :func:`render_html` lays the same primitives out in the fallback browser
+  print page and the QR verification page uses the same layout.
 
 Urdu is split into directional runs, shaped with HarfBuzz and drawn glyph by
 glyph at the positions HarfBuzz computed.  Embedded figures stay left to
@@ -350,7 +350,12 @@ def _urdu_width(text, size):
     renderer actually draws, so a label measured here is never narrower than
     the drawing beside it.
     """
-    from app.services.urdu_text import glyphs_width, UPEM
+    try:
+        from app.services.urdu_text import glyphs_width, UPEM
+    except ImportError:
+        # On a core-only install the browser can still shape the bundled face.
+        # Use an approximate width for positioning the HTML layout.
+        return len(text or '') * size * 0.45
     total = 0.0
     words = 0
     for chunk, direction in _urdu_runs(text):
@@ -1477,9 +1482,20 @@ def _draw_urdu(canvas, x, baseline, text, size, color, align, bold=False):
 
 def render_pdf(doc, title=None, author=None, copies=1):
     """Render *doc* to PDF bytes (A5, or two A5 copies on an A4 leaf)."""
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfgen import canvas as rl_canvas
+    except ImportError:
+        return None
+    from app.services.bilingual import _PUA_BASE
+
+    font_name = urdu_font_name()
+    # The plain TTF can register successfully when the shaped-font cache is
+    # unavailable, but it cannot draw our glyph IDs. Let callers fall back
+    # rather than serving a PDF with missing Urdu text.
+    if not font_name or pdfmetrics.getFont(font_name).face.charToGlyph.get(_PUA_BASE + 1) != 1:
+        return None
     register_latin_fonts()
-    urdu_font_name()
-    from reportlab.pdfgen import canvas as rl_canvas
 
     pages = compose_document(doc, copies=copies)
     buf = io.BytesIO()

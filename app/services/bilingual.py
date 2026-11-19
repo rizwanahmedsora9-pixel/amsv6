@@ -24,6 +24,7 @@ from __future__ import annotations
 import html as html_lib
 import os
 import re
+import tempfile
 
 # --------------------------------------------------------------------------
 # Font location / registration
@@ -109,7 +110,6 @@ def urdu_size_for_html(font_size: float) -> float:
 def _font_cache_dir() -> str:
     cache = os.environ.get('AMS_FONT_CACHE_DIR')
     if not cache:
-        import tempfile
         cache = os.path.join(tempfile.gettempdir(), 'ams_font_cache')
     os.makedirs(cache, exist_ok=True)
     return cache
@@ -124,6 +124,7 @@ def _shaped_font_path() -> str | None:
     if not urdu_font_available():
         return None
     dst = os.path.join(_font_cache_dir(), 'JameelNooriNastaleeq-shaped.ttf')
+    tmp = None
     try:
         if os.path.exists(dst) and os.path.getsize(dst) > 0:
             return dst
@@ -141,12 +142,21 @@ def _shaped_font_path() -> str | None:
         fmt12.language = 0
         fmt12.cmap = newmap
         tt['cmap'].tables.append(fmt12)
-        tmp = dst + '.tmp'
-        tt.save(tmp)
+        # Multiple workers can see a cold font cache at once. Give each a
+        # private temp file and only publish the completed font atomically.
+        with tempfile.NamedTemporaryFile(dir=os.path.dirname(dst), suffix='.ttf', delete=False) as output:
+            tmp = output.name
+            tt.save(output)
         os.replace(tmp, dst)
         return dst
     except Exception:
         return None
+    finally:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 def register_urdu_font() -> str | None:

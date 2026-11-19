@@ -1,6 +1,16 @@
 """direct_sales — split from sales.py."""
 from ._common import *  # noqa
 
+
+def _parse_filter_date(value):
+    if not value:
+        return None
+    parsed = date.fromisoformat(value)
+    if parsed.isoformat() != value:
+        raise ValueError('Expected YYYY-MM-DD')
+    return parsed
+
+
 @bp.route('/direct_sales')
 @login_required
 def direct_sales_page():
@@ -10,6 +20,18 @@ def direct_sales_page():
     filter_bill_state = (request.args.get('bill_state') or '').strip().lower()  # all|billed|unbilled
     filter_category = (request.args.get('category') or '').strip()
     filter_material = (request.args.get('material') or '').strip()
+    date_from = (request.args.get('date_from') or '').strip()
+    date_to = (request.args.get('date_to') or '').strip()
+    date_range_error = None
+    try:
+        start_date = _parse_filter_date(date_from)
+        end_date = _parse_filter_date(date_to)
+    except ValueError:
+        date_range_error = 'Enter valid dates in YYYY-MM-DD format.'
+    else:
+        if start_date and end_date and end_date < start_date:
+            date_range_error = 'To Date must be on or after From Date.'
+
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
     per_page = min(max(per_page, 10), 50)
@@ -73,6 +95,18 @@ def direct_sales_page():
         sales_q = sales_q.filter(
             DirectSale.items.any(DirectSaleItem.product_name.ilike(f'%{filter_material}%'))
         )
+
+    if date_range_error:
+        # Do not silently show unfiltered sales for an invalid range.
+        sales_q = sales_q.filter(False)
+    else:
+        # SQLite stores the local posted timestamp as ISO text. Use its date
+        # part directly so late-night fractional seconds never round up.
+        posted_date = func.substr(DirectSale.date_posted, 1, 10)
+        if start_date:
+            sales_q = sales_q.filter(posted_date >= start_date.isoformat())
+        if end_date:
+            sales_q = sales_q.filter(posted_date <= end_date.isoformat())
 
     sales_pagination = sales_q.order_by(DirectSale.entry_seq.desc(), DirectSale.date_posted.desc(), DirectSale.id.desc()).paginate(
         page=page, per_page=per_page, error_out=False
@@ -251,11 +285,14 @@ def direct_sales_page():
                            show_mode=show_mode,
                            pagination=sales_pagination,
                            per_page=per_page,
+                           date_range_error=date_range_error,
                            filters={
                                'client': filter_client,
                                'bill_no': filter_bill_no,
                                'bill_state': filter_bill_state or 'all',
                                'category': filter_category,
-                               'material': filter_material
+                               'material': filter_material,
+                               'date_from': date_from,
+                               'date_to': date_to,
                            })
 
