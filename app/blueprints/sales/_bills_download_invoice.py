@@ -794,6 +794,7 @@ def download_invoice(bill_no):
             bill_no=bill_no,
             action=action,
             copies=copies,
+            print_html=request.args.get('print_format') == 'html',
             src=request.args.get('src'),
             src_id=request.args.get('src_id'),
             client_code=request.args.get('client_code'),
@@ -952,7 +953,7 @@ def _urdu_bill_response(*, bill_type, bill, items, client, previous_balance,
                         client_name_ur, transaction_label, transaction_note,
                         terms, grn_bd, action, disposition, copies=1,
                         sections=None, booked_summary=None):
-    """Return the Urdu bill as a PDF (download) or as the print page.
+    """Return an embedded-font Urdu PDF, with the HTML print page as fallback.
 
     ``copies`` is the carbon-copy switch: 1 (the default) prints the single
     approved A5 sheet; 2 prints the same receipt twice on one A4 landscape
@@ -961,12 +962,10 @@ def _urdu_bill_response(*, bill_type, bill, items, client, previous_balance,
     previous balance, signature, delivery); anything absent stays on.
     """
     from app.services import bill_urdu
-    from app.services.files_pdf import _safe_download_name
+    from app.services.files_pdf import _disable_response_cache, _safe_download_name
     from app.services.time_money import pk_now
 
     settings_obj = Settings.query.first()
-    client_name = getattr(bill, 'client_name', '') or (
-        getattr(client, 'name', '') if client is not None else '')
     party_label = ''
 
     document = bill_urdu.build_document(
@@ -993,34 +992,30 @@ def _urdu_bill_response(*, bill_type, bill, items, client, previous_balance,
     section = _URDU_SECTION.get(bill_type, 'BILL')
     title = f"Urdu {bill_type or 'Bill'} - {document.get('bill_no') or ''}".strip()
 
-    if action == 'print':
-        html = bill_urdu.render_html(document, title=title,
-                                     auto_print=False, copies=copies)
-        response = make_response(html)
-        name = _safe_download_name(f'{section}-{stamp}-UR.html', 'bill-ur.html')
-        response.headers['Content-Disposition'] = f'{disposition}; filename={name}'
-        response.headers['Content-Type'] = 'text/html; charset=utf-8'
-        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-        return response
+    data = None
+    if not (action == 'print' and request.args.get('print_format') == 'html'):
+        try:
+            if action == 'print':
+                # Without positioned Nastaleeq shaping, the native browser
+                # renderer is safer than a PDF with misplaced marks.
+                from app.services.urdu_text import harfbuzz_available
+                can_print_pdf = harfbuzz_available()
+            else:
+                can_print_pdf = True
+            if can_print_pdf:
+                data = bill_urdu.render_pdf(document, title=title, copies=copies)
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'Urdu receipt PDF rendering failed; serving the browser print page.',
+                exc_info=True,
+            )
 
-    data = bill_urdu.render_pdf(document, title=title, copies=copies)
-    if not data:
-        # ReportLab is a hard dependency of the PDF path; if it is missing the
-        # printable page is still a correct Urdu bill, so serve that instead of
-        # an error.
-        html = bill_urdu.render_html(document, title=title, copies=copies)
-        response = make_response(html)
+    if data:
+        response = Response(data, mimetype='application/pdf')
+        name = _safe_download_name(f'{section}-{stamp}-UR.pdf', 'bill-ur.pdf')
+    else:
+        response = make_response(bill_urdu.render_html(document, title=title, copies=copies))
         name = _safe_download_name(f'{section}-{stamp}-UR.html', 'bill-ur.html')
-        response.headers['Content-Disposition'] = f'{disposition}; filename={name}'
-        response.headers['Content-Type'] = 'text/html; charset=utf-8'
-        return response
 
-    name = _safe_download_name(f'{section}-{stamp}-UR.pdf', 'bill-ur.pdf')
-    response = make_response(data)
-    response.headers['Content-Type'] = 'application/pdf'
-    response.headers['Content-Length'] = str(len(data))
-    response.headers['Content-Disposition'] = f'{disposition}; filename={name}'
-    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
-    return response
+    response.headers.set('Content-Disposition', disposition, filename=name)
+    return _disable_response_cache(response)

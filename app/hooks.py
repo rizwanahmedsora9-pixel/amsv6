@@ -160,7 +160,7 @@ def register_hooks(app):
         # LAN and code updates deploy often; without this, a cached page can
         # run OLD page scripts against NEW routes and hang (edit modal stuck
         # forever).  Static assets keep their own caching rules.
-        if (response.headers.get('Content-Type') or '').startswith('text/html'):
+        if response.mimetype == 'text/html' and not response.cache_control.no_store:
             response.headers['Cache-Control'] = 'no-cache'
         return response
 

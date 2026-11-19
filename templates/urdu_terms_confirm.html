@@ -13,6 +13,7 @@
                           action="{{ url_for('download_invoice', bill_no=bill_no) }}">
                         <input type="hidden" name="lang" value="ur">
                         {% if action %}<input type="hidden" name="action" value="{{ action }}">{% endif %}
+                        {% if action == 'print' and print_html %}<input type="hidden" name="print_format" value="html">{% endif %}
                         {% if src %}<input type="hidden" name="src" value="{{ src }}">{% endif %}
                         {% if src_id %}<input type="hidden" name="src_id" value="{{ src_id }}">{% endif %}
                         {% if client_code %}<input type="hidden" name="client_code" value="{{ client_code }}">{% endif %}
@@ -187,10 +188,18 @@
                             {% endfor %}
                         </div>
 
+                        {% if action == 'print' and not print_html %}
+                        <p class="text-white-50 small mt-4 mb-0">
+                            Print opens a lightweight PDF. Use its print button, or choose Browser Print if your device cannot open PDFs.
+                        </p>
+                        {% endif %}
                         <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-4">
                             <a href="{{ url_for('view_bill', bill_no=bill_no) }}" class="btn btn-outline-light btn-sm">
                                 <i class="bi bi-x-lg me-1"></i> Cancel
                             </a>
+                            {% if action == 'print' and not print_html %}
+                            <button type="submit" class="btn btn-outline-light btn-sm" name="print_format" value="html">Browser Print</button>
+                            {% endif %}
                             <button type="submit" class="btn btn-warning btn-sm fw-bold">
                                 {% if action == 'print' %}<i class="bi bi-printer me-1"></i> Print Urdu Receipt
                                 {% else %}<i class="bi bi-file-earmark-pdf me-1"></i> Download Urdu PDF

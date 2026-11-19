@@ -194,11 +194,17 @@
                 </div>
             </div>
             <div class="modal-footer">
+                <p class="w-100 text-white-50 small mb-1">
+                    Print opens a lightweight PDF. Use its print button, or choose Browser Print if your device cannot open PDFs.
+                </p>
                 <button type="button" class="btn btn-outline-light btn-sm" data-bs-dismiss="modal">
                     <i class="bi bi-x-lg me-1"></i> Cancel
                 </button>
                 <button type="button" class="btn btn-outline-warning btn-sm fw-bold me-2" id="urduTcDownload">
                     <i class="bi bi-file-earmark-pdf me-1"></i> Download Urdu PDF
+                </button>
+                <button type="button" class="btn btn-outline-light btn-sm" id="urduTcBrowserPrint">
+                    Browser Print
                 </button>
                 <button type="button" class="btn btn-warning btn-sm fw-bold" id="urduTcPrint">
                     <i class="bi bi-printer me-1"></i> Print Urdu Receipt
@@ -229,6 +235,7 @@
         var tcOptions = document.getElementById('urduTcOptions');
         var downloadBtn = document.getElementById('urduTcDownload');
         var printBtn = document.getElementById('urduTcPrint');
+        var browserPrintBtn = document.getElementById('urduTcBrowserPrint');
         var buttons = document.querySelectorAll('[data-urdu-receipt]');
         var sectionBoxes = Array.from(
             document.querySelectorAll('[data-urdu-section]')
@@ -325,7 +332,7 @@
             tcOptions.style.display = 'none';
         });
 
-        function go(action) {
+        function go(action, printFormat) {
             var yes = tcYes.checked;
             var ids = Array.from(
                 tcOptions.querySelectorAll('input[name="urduTcIds"]:checked')
@@ -334,6 +341,7 @@
             var base = urlFor(action);
             if (!base) return;
             var url = base + 'tc=' + (yes ? '1' : '0');
+            if (printFormat === 'html') url += '&print_format=html';
             if (yes && ids.length) {
                 url += '&tc_ids=' + ids.join(',');
             }
@@ -354,6 +362,7 @@
 
         downloadBtn.addEventListener('click', function () { go('download'); });
         printBtn.addEventListener('click', function () { go('print'); });
+        browserPrintBtn.addEventListener('click', function () { go('print', 'html'); });
 
         // Wire up the "Urdu Print" / "Urdu PDF" buttons on this page so they
         // open the dialog instead of linking straight to the document.

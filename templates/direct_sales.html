@@ -259,16 +259,19 @@
 {{ ui_header('bi-cart-check', 'Sales', subtitle='Direct sales — billed and unbilled', toolbar=_ds_toolbar) }}
 
 <div class="ds-mode-tabs mb-3">
-    <a href="{{ url_for('direct_sales_page', show='active') }}" class="btn btn-sm {% if show_mode == 'active' %}btn-warning text-dark{% else %}btn-outline-warning{% endif %} fw-bold">Active</a>
-    <a href="{{ url_for('direct_sales_page', show='all') }}" class="btn btn-sm {% if show_mode == 'all' %}btn-info text-dark{% else %}btn-outline-info{% endif %} fw-bold">All</a>
+    <a href="{{ url_for('direct_sales_page', show='active', per_page=per_page, **filters) }}" class="btn btn-sm {% if show_mode == 'active' %}btn-warning text-dark{% else %}btn-outline-warning{% endif %} fw-bold">Active</a>
+    <a href="{{ url_for('direct_sales_page', show='all', per_page=per_page, **filters) }}" class="btn btn-sm {% if show_mode == 'all' %}btn-info text-dark{% else %}btn-outline-info{% endif %} fw-bold">All</a>
 </div>
 
 <div class="ui-card ds-filter-card mb-3">
     <div class="ui-card-body">
-        <button class="btn btn-outline-secondary btn-sm w-100 mb-2 d-md-none fw-bold" type="button" data-bs-toggle="collapse" data-bs-target="#dsFilterCollapse" aria-expanded="false" aria-controls="dsFilterCollapse">
+        <button class="btn btn-outline-secondary btn-sm w-100 mb-2 d-md-none fw-bold" type="button" data-bs-toggle="collapse" data-bs-target="#dsFilterCollapse" aria-expanded="{{ 'true' if date_range_error else 'false' }}" aria-controls="dsFilterCollapse">
             <i class="bi bi-funnel me-1"></i> Filter Options
         </button>
-        <div class="collapse d-md-block" id="dsFilterCollapse">
+        <div class="collapse d-md-block{% if date_range_error %} show{% endif %}" id="dsFilterCollapse">
+        {% if date_range_error %}
+        <div id="dsDateRangeError" class="alert alert-warning py-2 mb-2" role="alert">{{ date_range_error }}</div>
+        {% endif %}
         <form method="GET" action="{{ url_for('direct_sales_page') }}" class="row g-2 form-grid-top ui-helper-form sales-filter-form">
             <input type="hidden" name="show" value="{{ show_mode }}">
             <input type="hidden" name="page" value="1">
@@ -323,6 +326,18 @@
                     {% endfor %}
                 </div>
                 <div id="dsFilterMatDisplay" class="text-info small mt-1 fw-bold"></div>
+            </div>
+            <div class="col-lg-4 col-md-8">
+                <div class="row g-2">
+                    <div class="col-6">
+                        <label class="ui-label" for="dsDateFrom">From Date</label>
+                        <input type="date" name="date_from" id="dsDateFrom" class="form-control form-control-sm" value="{{ filters.date_from }}"{% if date_range_error %} aria-describedby="dsDateRangeError"{% endif %}>
+                    </div>
+                    <div class="col-6">
+                        <label class="ui-label" for="dsDateTo">To Date</label>
+                        <input type="date" name="date_to" id="dsDateTo" class="form-control form-control-sm" value="{{ filters.date_to }}"{% if date_range_error %} aria-describedby="dsDateRangeError"{% endif %}>
+                    </div>
+                </div>
             </div>
             <div class="col-lg-1 col-md-3 col-sm-6">
                 <label class="ui-label">Rows</label>
@@ -496,7 +511,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="12" class="text-center py-4 text-white-50">No sales found for selected filters.</td>
+                    <td colspan="12" class="text-center py-4 text-white-50">{% if date_range_error %}Fix the date range to view sales.{% else %}No sales found for selected filters.{% endif %}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -509,7 +524,7 @@
         {% if pagination.has_prev %}
         <li class="page-item">
             <a class="page-link bg-dark border-secondary text-warning"
-               href="{{ url_for('direct_sales_page', page=pagination.prev_num, per_page=per_page, show=show_mode, client=(filters.client if filters else ''), bill_no=(filters.bill_no if filters else ''), bill_state=(filters.bill_state if filters else ''), category=(filters.category if filters else ''), material=(filters.material if filters else '')) }}">Previous</a>
+               href="{{ url_for('direct_sales_page', page=pagination.prev_num, per_page=per_page, show=show_mode, **filters) }}">Previous</a>
         </li>
         {% endif %}
         <li class="page-item active">
@@ -518,7 +533,7 @@
         {% if pagination.has_next %}
         <li class="page-item">
             <a class="page-link bg-dark border-secondary text-warning"
-               href="{{ url_for('direct_sales_page', page=pagination.next_num, per_page=per_page, show=show_mode, client=(filters.client if filters else ''), bill_no=(filters.bill_no if filters else ''), bill_state=(filters.bill_state if filters else ''), category=(filters.category if filters else ''), material=(filters.material if filters else '')) }}">Next</a>
+               href="{{ url_for('direct_sales_page', page=pagination.next_num, per_page=per_page, show=show_mode, **filters) }}">Next</a>
         </li>
         {% endif %}
     </ul>
