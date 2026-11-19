@@ -19,15 +19,15 @@ from utils.module_loader import load_modules
 
 def create_app(test_config: dict | None = None) -> Flask:
     root = Path(__file__).resolve().parent.parent
+    instance_dir = Path((test_config or {}).get("INSTANCE_PATH") or root / "instance").resolve()
     app = Flask(
         __name__,
         template_folder=str(root / "templates"),
         static_folder=str(root / "static"),
-        instance_path=str(root / "instance"),
+        instance_path=str(instance_dir),
         instance_relative_config=True,
     )
 
-    instance_dir = root / "instance"
     instance_dir.mkdir(parents=True, exist_ok=True)
     tmp_dir = instance_dir / ".tmp"
     (tmp_dir / "import_uploads").mkdir(parents=True, exist_ok=True)

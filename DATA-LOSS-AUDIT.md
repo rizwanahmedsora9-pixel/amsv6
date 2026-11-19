@@ -74,3 +74,26 @@ problems. Two operational fixes remain outside the code: switching the
 PythonAnywhere site to **WAL** if your plan allows it, and paginating `/grn` and
 `/ledger/2`, which are very heavy pages. The sale-path lock time is already down
 from ~2.2 s to ~0.9 s per save.
+
+## Client record visibility and legacy ownership (2026-11-19)
+
+Read-only audit of `AMS_FULL_20261116-044312.amsdb`: 38 clients (37 active,
+1 inactive), 52 movement entries, 28 direct sales, 18 bookings, 32 pending
+bills, and 1 payment. All of these rows were preserved in the import rehearsal.
+Both ledger screens were exercised for each restored client. The movement,
+sales, and pending-bill tables also contain 6, 3, and 3 rows respectively
+without a matching client code or name. Those rows were retained and not
+assigned to a client by guesswork. The snapshot has no outstanding client
+transfer links; it cannot establish the cause of current live incidents.
+
+The ledger now uses a stored client code before the historical display name
+on records that carry both. Client edits no longer move rows with another
+client's code, and a rename preserves older payments by attaching their
+stable client ID when the original client name is unambiguous. Suspended
+clients remain accessible under **Inactive Clients → View Ledger**.
+
+The old Transfer action moved only part of the history and did not record
+which rows it moved. The old Reclaim action could then move the receiving
+client's own rows back to the wrong client. Both actions are paused; any
+past suspected misassignment should be traced against backups and bill IDs
+before manually correcting ownership.

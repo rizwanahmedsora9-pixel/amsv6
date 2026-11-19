@@ -1,4 +1,5 @@
 from ._common import *  # noqa
+from app.services.client_identity import client_reference_filter
 
 @bp.route('/edit_client/<int:id>', methods=['POST'])
 @login_required
@@ -26,43 +27,47 @@ def edit_client(id):
             flash('Client code is required', 'danger')
             return redirect(url_for('clients'))
 
-        existing = Client.query.filter_by(code=new_code).first()
-        if existing and existing.id != id:
+        if not new_name:
+            flash('Client name is required', 'danger')
+            return redirect(url_for('clients'))
+
+        others = Client.query.filter(Client.id != id)
+
+        def another_client_has(column, value):
+            return others.filter(func.lower(func.trim(column)) == (value or '').strip().lower()).first() is not None
+
+        if another_client_has(Client.code, new_code):
             flash(f'Client code "{new_code}" already exists', 'danger')
             return redirect(url_for('clients'))
 
         if old_code != new_code or old_name != new_name:
-            PendingBill.query.filter_by(client_code=old_code).update({
-                'client_code': new_code,
-                'client_name': new_name
-            })
-            Entry.query.filter_by(client_code=old_code).update({
-                'client_code': new_code,
-                'client': new_name
-            })
-            Entry.query.filter_by(client=old_name).update({'client': new_name})
+            ambiguous_name = another_client_has(Client.name, old_name)
+            if another_client_has(Client.code, old_code) or (
+                old_name != new_name and (ambiguous_name or another_client_has(Client.name, new_name))
+            ):
+                flash('Client identity is ambiguous. No records were changed; ask an administrator to review duplicate names or codes.', 'danger')
+                return redirect(url_for('clients'))
 
-            # Propagate name change to all related tables to prevent broken links
-            Booking.query.filter_by(client_name=old_name).update({'client_name': new_name})
-            DirectSale.query.filter_by(client_name=old_name).update({
-                'client_name': new_name,
-                'client_code': new_code
-            })
-            # Payment.client_id is the stable relationship; keep client_name as
-            # the historical display snapshot instead of rewriting financial history.
-            WaiveOff.query.filter_by(client_name=old_name).update({
-                'client_name': new_name,
-                'client_code': new_code
-            })
-            Invoice.query.filter_by(client_name=old_name).update({'client_name': new_name})
-            Invoice.query.filter_by(client_code=old_code).update({'client_code': new_code})
-            
-            # CRITICAL FIX: Update orphaned tables that were previously being skipped
-            # See CLIENT_ORPHANING_FIX_PLAN.md for context on this data integrity issue
-            MaterialReturn.query.filter_by(client_name=old_name).update({'client_name': new_name})
-            Delivery.query.filter_by(client_name=old_name).update({'client_name': new_name})
-            DirectSaleDraft.query.filter_by(client_name=old_name).update({'client_name': new_name})
-            DirectSaleDraft.query.filter_by(client_code=old_code).update({'client_code': new_code})
+            for model, name_col in (
+                (PendingBill, PendingBill.client_name), (Entry, Entry.client),
+                (DirectSale, DirectSale.client_name), (WaiveOff, WaiveOff.client_name),
+                (Invoice, Invoice.client_name), (DirectSaleDraft, DirectSaleDraft.client_name),
+            ):
+                model.query.filter(client_reference_filter(
+                    model.client_code, name_col, code=old_code, name=old_name,
+                    allow_name_fallback=not ambiguous_name,
+                )).update({model.client_code: new_code, name_col: new_name}, synchronize_session=False)
+
+            if old_name != new_name:
+                for model in (Booking, MaterialReturn, Delivery):
+                    model.query.filter(func.lower(func.trim(model.client_name)) == old_name.strip().lower()).update(
+                        {model.client_name: new_name}, synchronize_session=False,
+                    )
+                # Keep the payment's historic printed name. Claim only legacy
+                # unlinked payments with the old, now-proven unique name.
+                Payment.query.filter(
+                    Payment.client_id.is_(None), func.lower(func.trim(Payment.client_name)) == old_name.strip().lower(),
+                ).update({Payment.client_id: c.id}, synchronize_session=False)
 
         page_entries_raw = request.form.getlist('page_entry')
         page_entries_clean = [str(x).strip() for x in page_entries_raw if str(x).strip()]

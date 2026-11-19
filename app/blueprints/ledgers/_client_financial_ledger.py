@@ -1,5 +1,7 @@
 """client — split from ledgers.py."""
 from ._common import *  # noqa
+from app.services.client_identity import client_reference_filter
+from app.services.ledgers import client_material_entry_filter
 from sqlalchemy.orm import joinedload
 from app.services.booking_cancel_plan import build_client_booking_cancel_plan
 
@@ -256,11 +258,9 @@ def build_client_material_analysis(client_name_norm, materials=None, services=No
     # made this tab the slowest part of the page.  Grouping per material name
     # first keeps the (few) free-text names, so the identity/discount rules in
     # _add_line still see every row it used to see — only in fewer round trips.
-    sale_filter = [func.lower(func.trim(DirectSale.client_name)) == client_name_norm]
-    if client_code:
-        sale_filter.append(
-            func.upper(func.trim(DirectSale.client_code)) == client_code.strip().upper()
-        )
+    sale_filter = client_reference_filter(
+        DirectSale.client_code, DirectSale.client_name, code=client_code, name=client_name_norm,
+    )
     line_gross = func.sum(
         DirectSaleItem.qty * func.coalesce(DirectSaleItem.price_at_time, 0)
         - func.coalesce(DirectSaleItem.discount, 0)
@@ -273,7 +273,7 @@ def build_client_material_analysis(client_name_norm, materials=None, services=No
     ).join(
         DirectSale, DirectSale.id == DirectSaleItem.sale_id
     ).filter(
-        or_(*sale_filter),
+        sale_filter,
         DirectSale.is_void == False,  # noqa: E712
     ).group_by(DirectSaleItem.product_name).all()
     for row in line_rows:
@@ -445,7 +445,11 @@ def financial_ledger(client_id):
         return datetime.min
 
     # 1. Fetch Pending Bills
-    pending_bills = PendingBill.query.filter_by(client_code=client.code, is_void=False).order_by(PendingBill.id.desc()).all()
+    pending_bills = PendingBill.query.filter(
+        client_reference_filter(PendingBill.client_code, PendingBill.client_name,
+                                code=client.code, name=client.name),
+        PendingBill.is_void.is_(False),
+    ).order_by(PendingBill.id.desc()).all()
 
     # Sanitize pending bills for template to avoid NoneType error
     for pb in pending_bills:
@@ -481,7 +485,8 @@ def financial_ledger(client_id):
         DirectSale.client_code, DirectSale.category,
     ]
     ds_rows = db.session.query(*ds_columns).filter(
-        func.lower(func.trim(DirectSale.client_name)) == client_name_norm
+        client_reference_filter(DirectSale.client_code, DirectSale.client_name,
+                                code=client.code, name=client.name)
     ).all()
     invoice_nos = {}
     invoice_ids = [row.invoice_id for row in ds_rows if getattr(row, 'invoice_id', None)]
@@ -512,7 +517,7 @@ def financial_ledger(client_id):
     cancel_bill_refs = set()
     cancel_amount_by_bill = {}
     cancel_bill_rows = Entry.query.filter(
-        (Entry.client_code == client.code) | (func.lower(func.trim(Entry.client)) == client_name_norm),
+        client_material_entry_filter(client),
         Entry.type == 'CANCEL',
         Entry.is_void == False
     ).all()
@@ -643,7 +648,8 @@ def financial_ledger(client_id):
             })
 
     waive_rows = WaiveOff.query.filter(
-        func.lower(func.trim(WaiveOff.client_name)) == client_name_norm,
+        client_reference_filter(WaiveOff.client_code, WaiveOff.client_name,
+                                code=client.code, name=client.name),
         WaiveOff.is_void == False
     ).filter(
         ~func.lower(func.coalesce(WaiveOff.note, '')).like('[direct_sale_discount:%')
@@ -823,7 +829,7 @@ def financial_ledger(client_id):
 
     # Explicit booking-cancellation rows for readability in financial ledger.
     cancel_entries = Entry.query.filter(
-        (Entry.client_code == client.code) | (func.lower(func.trim(Entry.client)) == client_name_norm),
+        client_material_entry_filter(client),
         Entry.type == 'CANCEL',
         Entry.is_void == False
     ).order_by(Entry.date.asc(), Entry.time.asc(), Entry.id.asc()).all()
@@ -894,7 +900,7 @@ def financial_ledger(client_id):
     # - OUT/CANCEL against booked qty
     # - IN only when the return is a booked-material return (not cash/credit stock return)
     deliveries = Entry.query.filter(
-        (Entry.client_code == client.code) | (func.lower(func.trim(Entry.client)) == client_name_norm),
+        client_material_entry_filter(client),
         or_(
             Entry.type.in_(['OUT', 'CANCEL']),
             and_(
