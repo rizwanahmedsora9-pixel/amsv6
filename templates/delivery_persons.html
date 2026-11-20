@@ -71,6 +71,15 @@
                 <tr><td colspan="7" class="text-center py-4 text-white-50">No delivery persons found.</td></tr>
                 {% endfor %}
             </tbody>
+            <tfoot>
+                <tr class="fw-bold" style="background: #0f172a;">
+                    <th scope="row" colspan="2" class="ps-4 py-3">Grand total</th>
+                    <td class="text-end text-warning text-nowrap">{{ money(person_totals.values() | sum(attribute='earned'), 'Rs. ') }}</td>
+                    <td class="text-end text-success text-nowrap">{{ money(person_totals.values() | sum(attribute='paid'), 'Rs. ') }}</td>
+                    <td class="text-end text-danger text-nowrap" title="Remaining after payments and waive-offs">{{ money(person_totals.values() | sum(attribute='remaining'), 'Rs. ') }}</td>
+                    <td colspan="2"></td>
+                </tr>
+            </tfoot>
         </table>
     </div>
 </div>
