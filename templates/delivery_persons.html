@@ -1,7 +1,11 @@
 {% extends "layout.html" %}
 {% block content %}
+{% from 'ops/_delivery_rent_macros.html' import money %}
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-3">
-    <h2 class="fw-bold text-warning mb-0"><i class="bi bi-people me-2"></i>Delivery Persons</h2>
+    <div>
+        <h2 class="fw-bold text-warning mb-1"><i class="bi bi-people me-2"></i>Delivery Persons</h2>
+        <div class="text-white-50 small">Lifetime totals: earned, cash paid, and remaining after payments / waive-offs.</div>
+    </div>
     <div class="d-flex gap-2">
         <a href="/direct_sales" class="btn btn-outline-light btn-sm fw-bold"><i class="bi bi-arrow-left me-1"></i> Sales</a>
     </div>
@@ -36,6 +40,9 @@
                 <tr>
                     <th class="py-3 ps-4 text-white-50">Name</th>
                     <th class="py-3 text-white-50">Phone</th>
+                    <th class="py-3 text-end text-warning">Total earned</th>
+                    <th class="py-3 text-end text-success">Total paid</th>
+                    <th class="py-3 text-end text-danger">Total remaining</th>
                     <th class="py-3 text-white-50">Status</th>
                     <th class="py-3 pe-4 text-end text-white-50">Actions</th>
                 </tr>
@@ -45,6 +52,10 @@
                 <tr>
                     <td class="ps-4 fw-bold text-info">{{ row.name }}</td>
                     <td class="text-white-50">{{ row.phone or '-' }}</td>
+                    {% set totals = person_totals.get(row.id, {}) %}
+                    <td class="text-end text-warning text-nowrap">{{ money(totals.get('earned', 0), 'Rs. ') }}</td>
+                    <td class="text-end text-success text-nowrap">{{ money(totals.get('paid', 0), 'Rs. ') }}</td>
+                    <td class="text-end text-danger text-nowrap fw-semibold" title="Remaining after payments and waive-offs">{{ money(totals.get('remaining', 0), 'Rs. ') }}</td>
                     <td>
                         <span class="badge {{ 'bg-success' if row.is_active else 'bg-secondary' }}">{{ 'Active' if row.is_active else 'Inactive' }}</span>
                     </td>
@@ -57,7 +68,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="4" class="text-center py-4 text-white-50">No delivery persons found.</td></tr>
+                <tr><td colspan="7" class="text-center py-4 text-white-50">No delivery persons found.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
