@@ -1156,10 +1156,24 @@ def compute_physical_cash_difference(physical_cash, calculated_closing):
     return _money_round(physical_cash) - _money_round(calculated_closing)
 
 
-def _cf_resolve_category(direction, category_id, category_name, *, required, create_if_missing):
+def _cf_resolve_category(direction, category_id, category_name, *, required, create_if_missing,
+                         allow_inactive_id=None):
+    """Pick the category for an entry.
+
+    ``allow_inactive_id`` is the category an existing entry already carries.
+    An edit must be able to keep it even after the master was suspended —
+    otherwise suspending a master would freeze the history that uses it, and a
+    simple typo fix ("diesel refil") would be refused.  Only the *same* id is
+    accepted this way; any other suspended category still needs a Restore.
+    """
     if direction == CF_DIR_TRANSFER:
         return None
-    cat = _cf_find_category(category_id=category_id, name=category_name, active_only=True)
+    active_cat = _cf_find_category(category_id=category_id, name=category_name, active_only=True)
+    if not active_cat and category_id and allow_inactive_id and int(category_id) == int(allow_inactive_id):
+        kept = _cf_find_category(category_id=category_id, active_only=False)
+        if kept and (kept.direction or 'both').lower() in ('both', direction):
+            return kept
+    cat = active_cat
     if cat:
         allowed = (cat.direction or 'both').lower()
         if allowed not in ('both', direction):
@@ -1187,7 +1201,8 @@ def _cf_resolve_category(direction, category_id, category_name, *, required, cre
     return None
 
 
-def _cf_resolve_subcategory(category, subcategory_id, subcategory_name, *, create_if_missing):
+def _cf_resolve_subcategory(category, subcategory_id, subcategory_name, *, create_if_missing,
+                            allow_inactive_id=None):
     if not category:
         if subcategory_id or (subcategory_name or '').strip():
             raise ValueError('Sub-category requires a category.')
@@ -1195,7 +1210,18 @@ def _cf_resolve_subcategory(category, subcategory_id, subcategory_name, *, creat
     sub = _cf_find_subcategory(category, subcategory_id=subcategory_id, name=subcategory_name, active_only=True)
     if sub:
         return sub
+    if subcategory_id and allow_inactive_id and int(subcategory_id) == int(allow_inactive_id):
+        kept = _cf_find_subcategory(category, subcategory_id=subcategory_id, active_only=False)
+        if kept:
+            return kept
     if subcategory_id:
+        # Distinguish "belongs to another category" from "belongs here but is
+        # suspended": the operator's next action differs (pick again vs restore).
+        suspended = _cf_find_subcategory(category, subcategory_id=subcategory_id, active_only=False)
+        if suspended:
+            raise ValueError(
+                f"Sub-category '{suspended.name}' is disabled. Restore it or pick another sub-category."
+            )
         raise ValueError('Sub-category does not belong to the selected category.')
     name = (subcategory_name or '').strip()
     if name:
@@ -1243,6 +1269,7 @@ def validate_manual_cash_flow(
     *, direction, amount, account_id, destination_account_id=None,
     category_id=None, category_name=None, subcategory_id=None, subcategory_name=None,
     require_category=True, create_missing=False, check_balance=True,
+    keep_category_id=None, keep_subcategory_id=None,
 ):
     direction = _cf_normalize_direction(direction)
     if direction not in CF_DIRECTIONS:
@@ -1275,8 +1302,11 @@ def validate_manual_cash_flow(
         cat = _cf_resolve_category(
             direction, category_id, category_name,
             required=require_category, create_if_missing=create_missing,
+            allow_inactive_id=keep_category_id,
         )
-        _cf_resolve_subcategory(cat, subcategory_id, subcategory_name, create_if_missing=create_missing)
+        _cf_resolve_subcategory(cat, subcategory_id, subcategory_name,
+                                create_if_missing=create_missing,
+                                allow_inactive_id=keep_subcategory_id)
     if check_balance and direction in (CF_DIR_OUT, CF_DIR_TRANSFER) and float(account.balance or 0) < amount:
         raise ValueError(f'Insufficient balance in {account.name}.')
     return direction, amount, account, destination
@@ -1399,12 +1429,16 @@ def update_manual_cash_flow_entry(
     if tx:
         for old_account_id in {tx.from_account_id, tx.to_account_id}:
             _cf_assert_open_period(old_account_id, tx.date_posted, operation='edited')
+    # An edit keeps the entry's own (possibly since-suspended) masters.
+    keep_cat_id = entry.category_id
+    keep_sub_id = entry.subcategory_id
     direction, amount, account, destination = validate_manual_cash_flow(
         direction=direction, amount=amount, account_id=account_id,
         destination_account_id=destination_account_id, category_id=category_id,
         category_name=category_name, subcategory_id=subcategory_id,
         subcategory_name=subcategory_name, require_category=True,
         create_missing=create_missing, check_balance=False,
+        keep_category_id=keep_cat_id, keep_subcategory_id=keep_sub_id,
     )
     _cf_assert_open_period(account.id, posted, operation='posted')
     if destination:
@@ -1420,9 +1454,11 @@ def update_manual_cash_flow_entry(
 
     cat = _cf_resolve_category(
         direction, category_id, category_name, required=(direction != CF_DIR_TRANSFER),
-        create_if_missing=create_missing,
+        create_if_missing=create_missing, allow_inactive_id=keep_cat_id,
     ) if direction != CF_DIR_TRANSFER else None
-    sub = _cf_resolve_subcategory(cat, subcategory_id, subcategory_name, create_if_missing=create_missing)
+    sub = _cf_resolve_subcategory(cat, subcategory_id, subcategory_name,
+                                  create_if_missing=create_missing,
+                                  allow_inactive_id=keep_sub_id)
     ptype = (party_type or entry.party_type or 'other').strip().lower() or 'other'
     party = _cf_find_party(party_id=party_id, name=party_name, party_type=ptype, active_only=True)
     if not party and (party_name or '').strip():

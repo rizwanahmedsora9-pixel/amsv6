@@ -46,3 +46,52 @@ disabled one is still a `400`.
 message instead of a silently resurrected master. That is deliberate — the
 suspension is the shop's decision. The route to use a retired category again is
 **Restore** in Master Data Management.
+
+---
+
+## Does a suspend in Cash Flow reach the Accounts expense form in real time?
+
+**Yes — both the dropdown and the server.** Accounts keeps no copy of these
+masters; it reads the same rows on every request.
+
+* `blueprints/accounts/dashboard.py` builds the expense form from
+  `CashFlowCategory.query.filter(is_active == True, direction in ('out','both'))`
+  and `CashFlowSubcategory` joined to an `is_active` parent — so a category's
+  *sub-categories* vanish with it. Particles: `CashFlowParty.is_active`.
+* The template renders those lists straight into
+  `#expense_category_id`, `#expense_subcategory_id`, `#expense_party_id`
+  (`templates/accounts/dashboard.html`), with JS narrowing sub-categories to the
+  chosen category. Edit → the next page load shows the new name; Suspend /
+  Restore / Delete → the option is gone / back / gone, same id.
+* The POST `/accounts/transactions/new` path calls
+  `save_manual_cash_flow_entry(..., create_missing=False)`, which re-validates
+  server-side. A stale tab that submits a since-suspended id is refused
+  (`Selected category is missing or inactive.` /
+  `Sub-category 'X' is disabled. Restore it or pick another sub-category.` /
+  the party requirement) and **no entry, no account movement, no balance change**
+  is written. Covered by four tests.
+
+### One thing that had to be protected
+
+Suspension must retire a master for **new** entries only — never freeze history.
+`update_manual_cash_flow_entry` re-resolves the classification with
+`create_missing=False`, so without care, correcting the description of an old
+expense would be refused the moment its category was suspended.
+`_cf_resolve_category` / `_cf_resolve_subcategory` now take
+`allow_inactive_id`: the entry's **own** current category/sub-category stays
+accepted even if suspended; any *other* suspended master still needs a Restore.
+The edit also leaves the masters suspended (an edit is not a restore).
+
+## Blast radius of the change
+
+| Surface | Status |
+|---|---|
+| Only caller of the master-data helpers outside the service | `app/blueprints/reports/cash.py` (already updated) |
+| `save_manual_cash_flow_entry` callers | Cash Flow page (`create_missing=True`) and Accounts expense (`False`); validated above |
+| Accounts edit path | `create_missing=False` + own-master allowance; tested |
+| Entry lifecycle | record / edit / void / restore balances verified end-to-end |
+| Reporting pages | `/cash_flow`, `/cash_flow_differences`, `/financial_tracker`, `/daily_reconciliation`, `/profit_reports`, CSV + PDF export all render 200 |
+| Direction rules | unchanged — an income category is still refused on a Spent row |
+| Public signatures | `save_cf_*` gained optional `revive` / `reuse_active` (defaults preserve caller behaviour); everything else unchanged |
+| Database schema | **no migration** — no column or index added or changed |
+| Full suite | **84 passed, 5 skipped** (was 30 / 5 before this work) |

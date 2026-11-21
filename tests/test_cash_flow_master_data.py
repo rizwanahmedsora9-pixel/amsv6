@@ -27,6 +27,7 @@ off when a category is used only via a sub-category) and that a user without
 from __future__ import annotations
 
 from contextlib import contextmanager
+import html as html_module
 
 from flask import template_rendered
 from sqlalchemy import event
@@ -997,3 +998,301 @@ def test_source_labels_still_cover_the_manual_bucket(desk):
     """Guard the label table the master panel's direction select relies on."""
     assert CF_SOURCE_LABELS['MANUAL_CASH_FLOW'] == 'Manual'
     assert CF_DIR_IN in ('in',) and CF_DIR_OUT == 'out'
+
+
+# ---------------------------------------------------------------------------
+# Real-time propagation to the Accounts expense form
+# ---------------------------------------------------------------------------
+# Accounts does not keep its own copy of the masters: the expense form reads
+# cash_flow_category / cash_flow_subcategory / cash_flow_party on every render.
+# These tests pin that the Cash Flow panel's Edit / Disable / Restore / Delete
+# is visible on the very next Accounts page load, and that a disabled id that is
+# submitted anyway (a stale browser tab) is refused by the server — the form's
+# dropdown is a convenience, never the gate.
+def _expense_option_values(app, html, select_id):
+    """Option (value, label) pairs inside one <select id="..."> block."""
+    block = html.split(f'id="{select_id}"', 1)[1].split('</select>', 1)[0]
+    pairs = []
+    for chunk in block.split('<option ')[1:]:
+        value = chunk.split('value="', 1)[1].split('"', 1)[0]
+        label = chunk.split('>', 1)[1].split('</option>', 1)[0].strip()
+        pairs.append((value, html_module.unescape(label)))
+    return pairs
+
+
+def _accounts_form(app, web):
+    resp = web.get('/accounts/')
+    assert resp.status_code == 200
+    return resp.data.decode()
+
+
+def test_accounts_expense_form_reflects_category_edits_suspends_and_deletes_in_real_time(desk):
+    app, web = desk
+    with app.app_context():
+        fuel = make_category('Fuel', direction='out')
+        misc = make_category('Misc', direction='out')
+        fuel_sub = make_subcategory(fuel, 'Diesel')
+        misc_sub = make_subcategory(misc, 'Other')
+        db.session.add(CashFlowParty(name='Landlord', party_type='person', is_active=True))
+        fuel_id, misc_id = fuel.id, misc.id
+        fuel_sub_id, misc_sub_id = fuel_sub.id, misc_sub.id
+        db.session.commit()
+
+    # Baseline: both categories and both sub-categories are offered.
+    html = _accounts_form(app, web)
+    cats = dict(_expense_option_values(app, html, 'expense_category_id'))
+    subs = dict(_expense_option_values(app, html, 'expense_subcategory_id'))
+    assert cats[str(fuel_id)] == 'Fuel' and cats[str(misc_id)] == 'Misc'
+    assert subs[str(fuel_sub_id)] == 'Diesel' and subs[str(misc_sub_id)] == 'Other'
+
+    # 1. EDIT — the next page load shows the new name, same id.
+    post_action(web, 'rename_category', category_id=str(fuel_id),
+                category_name='Fuel & Oil', category_direction='out')
+    html = _accounts_form(app, web)
+    assert dict(_expense_option_values(app, html, 'expense_category_id'))[str(fuel_id)] == 'Fuel & Oil'
+
+    post_action(web, 'rename_subcategory', subcategory_id=str(fuel_sub_id),
+                subcategory_name='Diesel (PSO)')
+    html = _accounts_form(app, web)
+    assert dict(_expense_option_values(app, html, 'expense_subcategory_id'))[str(fuel_sub_id)] == 'Diesel (PSO)'
+
+    # 2. SUSPEND a category — it and its sub-category disappear immediately.
+    post_action(web, 'disable_category', category_id=str(fuel_id))
+    html = _accounts_form(app, web)
+    cats = dict(_expense_option_values(app, html, 'expense_category_id'))
+    subs = dict(_expense_option_values(app, html, 'expense_subcategory_id'))
+    assert str(fuel_id) not in cats
+    assert str(fuel_sub_id) not in subs, 'sub-category of a suspended category was still offered'
+    assert str(misc_id) in cats and str(misc_sub_id) in subs
+
+    # 3. SUSPEND only the sub-category — its parent stays selectable.
+    post_action(web, 'disable_subcategory', subcategory_id=str(misc_sub_id))
+    html = _accounts_form(app, web)
+    subs = dict(_expense_option_values(app, html, 'expense_subcategory_id'))
+    assert str(misc_sub_id) not in subs
+    assert str(misc_id) in dict(_expense_option_values(app, html, 'expense_category_id'))
+
+    # 4. RESTORE — both come back on the next load.
+    post_action(web, 'restore_category', category_id=str(fuel_id))
+    post_action(web, 'restore_subcategory', subcategory_id=str(fuel_sub_id))
+    post_action(web, 'restore_subcategory', subcategory_id=str(misc_sub_id))
+    html = _accounts_form(app, web)
+    assert str(fuel_id) in dict(_expense_option_values(app, html, 'expense_category_id'))
+    assert str(fuel_sub_id) in dict(_expense_option_values(app, html, 'expense_subcategory_id'))
+    assert str(misc_sub_id) in dict(_expense_option_values(app, html, 'expense_subcategory_id'))
+
+    # 5. SUSPEND a party — it leaves the recipient dropdown.
+    with app.app_context():
+        party_id = CashFlowParty.query.one().id
+    post_action(web, 'disable_party', party_id=str(party_id))
+    html = _accounts_form(app, web)
+    assert str(party_id) not in dict(_expense_option_values(app, html, 'expense_party_id'))
+    post_action(web, 'restore_party', party_id=str(party_id))
+    html = _accounts_form(app, web)
+    assert dict(_expense_option_values(app, html, 'expense_party_id'))[str(party_id)].startswith('Landlord')
+
+    # 6. DELETE an unused category — gone from the form on the next load.
+    post_action(web, 'delete_category', category_id=str(misc_id))
+    html = _accounts_form(app, web)
+    assert str(misc_id) not in dict(_expense_option_values(app, html, 'expense_category_id'))
+    assert str(misc_sub_id) not in dict(_expense_option_values(app, html, 'expense_subcategory_id'))
+
+
+def test_accounts_refuses_a_suspended_category_submitted_by_a_stale_tab(desk):
+    """The dropdown is convenience; the server must refuse on its own.
+
+    A tab left open while the category was suspended still posts the old id.
+    The expense must not be posted, and the master must stay suspended.
+    """
+    app, web = desk
+    with app.app_context():
+        acc = make_account()
+        cat = make_category('Fuel', direction='out')
+        sub = make_subcategory(cat, 'Diesel')
+        party = CashFlowParty(name='Landlord', party_type='person', is_active=True)
+        db.session.add(party)
+        db.session.commit()
+        acc_id, cat_id, sub_id, party_id = acc.id, cat.id, sub.id, party.id
+
+    post_action(web, 'disable_category', category_id=str(cat_id))
+
+    resp = web.post('/accounts/transactions/new', data={
+        'tx_mode': 'pay', 'pay_target': 'personal_expense',
+        'target_label': 'diesel refill', 'method': 'Cash',
+        'amount': '750', 'pay_from_account_id': str(acc_id),
+        'expense_category_id': str(cat_id), 'expense_party_id': str(party_id),
+    })
+    assert resp.status_code in (200, 302)          # reported, not a 500
+    assert 'missing or inactive' in last_flash(web), last_flash(web)
+    with app.app_context():
+        assert CashFlowEntry.query.count() == 0, 'an expense was posted on a suspended category'
+        assert db.session.get(CashFlowCategory, cat_id).is_active is False
+        assert db.session.get(CashFlowSubcategory, sub_id).is_active is True
+        assert db.session.get(Account, acc_id).balance == 500000.0
+
+
+def test_accounts_refuses_a_suspended_subcategory_submitted_by_a_stale_tab(desk):
+    app, web = desk
+    with app.app_context():
+        acc = make_account()
+        cat = make_category('Fuel', direction='out')
+        sub = make_subcategory(cat, 'Diesel')
+        party = CashFlowParty(name='Landlord', party_type='person', is_active=True)
+        db.session.add(party)
+        db.session.commit()
+        acc_id, cat_id, sub_id, party_id = acc.id, cat.id, sub.id, party.id
+
+    post_action(web, 'disable_subcategory', subcategory_id=str(sub_id))
+
+    web.post('/accounts/transactions/new', data={
+        'tx_mode': 'pay', 'pay_target': 'personal_expense',
+        'target_label': 'diesel refill', 'method': 'Cash',
+        'amount': '750', 'pay_from_account_id': str(acc_id),
+        'expense_category_id': str(cat_id), 'expense_subcategory_id': str(sub_id),
+        'expense_party_id': str(party_id),
+    })
+    flash_text = last_flash(web)
+    assert 'sub-category' in flash_text.lower() and 'disabled' in flash_text.lower(), flash_text
+    with app.app_context():
+        assert CashFlowEntry.query.count() == 0, 'an expense was posted on a suspended sub-category'
+        assert db.session.get(CashFlowSubcategory, sub_id).is_active is False
+        assert db.session.get(Account, acc_id).balance == 500000.0
+
+
+def test_accounts_refuses_a_suspended_party_submitted_by_a_stale_tab(desk):
+    app, web = desk
+    with app.app_context():
+        acc = make_account()
+        cat = make_category('Fuel', direction='out')
+        party = CashFlowParty(name='Landlord', party_type='person', is_active=True)
+        db.session.add(party)
+        db.session.commit()
+        acc_id, cat_id, party_id = acc.id, cat.id, party.id
+
+    post_action(web, 'disable_party', party_id=str(party_id))
+
+    web.post('/accounts/transactions/new', data={
+        'tx_mode': 'pay', 'pay_target': 'personal_expense',
+        'target_label': 'rent', 'method': 'Cash',
+        'amount': '750', 'pay_from_account_id': str(acc_id),
+        'expense_category_id': str(cat_id), 'expense_party_id': str(party_id),
+    })
+    flash_text = last_flash(web)
+    assert 'party' in flash_text.lower(), flash_text
+    with app.app_context():
+        assert CashFlowEntry.query.count() == 0, 'an expense was posted on a suspended party'
+        assert db.session.get(CashFlowParty, party_id).is_active is False
+        assert db.session.get(Account, acc_id).balance == 500000.0
+
+
+def test_accounts_expense_with_active_masters_still_posts_normally(desk):
+    """The guard must not break the happy path after a suspend/restore cycle."""
+    app, web = desk
+    with app.app_context():
+        acc = make_account()
+        cat = make_category('Fuel', direction='out')
+        sub = make_subcategory(cat, 'Diesel')
+        party = CashFlowParty(name='Landlord', party_type='person', is_active=True)
+        db.session.add(party)
+        db.session.commit()
+        acc_id, cat_id, sub_id, party_id = acc.id, cat.id, sub.id, party.id
+
+    # Suspend then restore: the rows must be usable again.
+    post_action(web, 'disable_category', category_id=str(cat_id))
+    post_action(web, 'restore_category', category_id=str(cat_id))
+
+    resp = web.post('/accounts/transactions/new', data={
+        'tx_mode': 'pay', 'pay_target': 'personal_expense',
+        'target_label': 'diesel refill', 'method': 'Cash',
+        'amount': '750', 'pay_from_account_id': str(acc_id),
+        'expense_category_id': str(cat_id), 'expense_subcategory_id': str(sub_id),
+        'expense_party_id': str(party_id),
+    })
+    assert resp.status_code in (200, 302)
+    with app.app_context():
+        entry = CashFlowEntry.query.one()
+        assert (entry.direction, entry.amount) == ('out', 750.0)
+        assert entry.category_id == cat_id
+        assert entry.subcategory_id == sub_id
+        assert entry.party_id == party_id
+        assert db.session.get(Account, acc_id).balance == 500000.0 - 750.0
+
+
+# ---------------------------------------------------------------------------
+# Suspension must not freeze history
+# ---------------------------------------------------------------------------
+def test_an_old_expense_stays_editable_after_its_category_is_suspended(desk):
+    """Suspending a master retires it for *new* entries only.
+
+    Accounts edits the ledger row behind an expense and re-resolves its
+    classification with ``create_missing=False``.  If a suspended master made
+    that resolution fail, correcting a typo in an old expense would be refused
+    — suspension would silently freeze history.  The entry's *own* category and
+    sub-category stay accepted; anything else suspended does not.
+    """
+    app, web = desk
+    with app.app_context():
+        acc = make_account()
+        cat = make_category('Fuel', direction='out')
+        sub = make_subcategory(cat, 'Diesel')
+        party = CashFlowParty(name='Landlord', party_type='person', is_active=True)
+        db.session.add(party)
+        db.session.commit()
+        acc_id, cat_id, sub_id, party_id = acc.id, cat.id, sub.id, party.id
+
+    # Book a normal expense, then retire the category and its sub-category.
+    resp = web.post('/accounts/transactions/new', data={
+        'tx_mode': 'pay', 'pay_target': 'personal_expense',
+        'target_label': 'diesel refil', 'method': 'Cash',
+        'amount': '750', 'pay_from_account_id': str(acc_id),
+        'expense_category_id': str(cat_id), 'expense_subcategory_id': str(sub_id),
+        'expense_party_id': str(party_id),
+    })
+    assert resp.status_code in (200, 302)
+    with app.app_context():
+        entry_id = CashFlowEntry.query.one().id
+        tx_id = db.session.get(CashFlowEntry, entry_id).account_tx_id
+
+    post_action(web, 'disable_subcategory', subcategory_id=str(sub_id))
+    post_action(web, 'disable_category', category_id=str(cat_id))
+
+    # Fix the typo in the description — the edit must go through.
+    resp = web.post(f'/accounts/transactions/{tx_id}/edit', data={
+        'description': 'diesel refill', 'amount': '750',
+        'from_account_id': str(acc_id),
+    })
+    assert resp.status_code in (200, 302)
+    with app.app_context():
+        entry = db.session.get(CashFlowEntry, entry_id)
+        assert entry.description == 'diesel refill', last_flash(web)
+        assert entry.category_id == cat_id and entry.subcategory_id == sub_id
+        assert db.session.get(Account, acc_id).balance == 500000.0 - 750.0
+        # The masters themselves stay suspended — an edit is not a restore.
+        assert db.session.get(CashFlowCategory, cat_id).is_active is False
+        assert db.session.get(CashFlowSubcategory, sub_id).is_active is False
+
+
+def test_an_old_expense_cannot_be_moved_to_a_different_suspended_category(desk):
+    """Only the entry's own suspended master is tolerated — not any suspended one."""
+    app, web = desk
+    with app.app_context():
+        acc = make_account()
+        old_cat = make_category('Fuel', direction='out')
+        retired = make_category('Retired', direction='out', active=False)
+        db.session.commit()
+        acc_id, old_cat_id, retired_id = acc.id, old_cat.id, retired.id
+        with pytest.raises(ValueError):
+            save_manual_cash_flow_entry(
+                direction='out', amount=100, account_id=acc_id,
+                category_id=retired_id, description='x', create_missing=False,
+            )
+        assert CashFlowEntry.query.count() == 0
+        # ... and naming it (rather than its id) gets the actionable message.
+        with pytest.raises(ValueError, match='disabled'):
+            save_manual_cash_flow_entry(
+                direction='out', amount=100, account_id=acc_id,
+                category_name='Retired', description='x', create_missing=True,
+            )
+        assert CashFlowEntry.query.count() == 0
+        assert db.session.get(CashFlowCategory, retired_id).is_active is False
+        assert db.session.get(CashFlowCategory, old_cat_id).is_active is True
