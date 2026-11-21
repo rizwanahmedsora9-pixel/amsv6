@@ -91,6 +91,10 @@ def cash_flow_categories_meta():
                 payload.get('direction') or payload.get('new_category_direction') or 'both',
                 notes=payload.get('notes') or payload.get('new_category_notes'),
                 actor=current_user,
+                # An idempotent "make sure this exists" is safe here because
+                # nothing is written for an existing row; a disabled one still
+                # refuses (see save_cf_category).
+                reuse_active=True,
             )
             db.session.commit()
             return jsonify({
@@ -140,6 +144,7 @@ def cash_flow_subcategories_meta():
                 payload.get('name') or payload.get('new_subcategory_name'),
                 notes=payload.get('notes') or payload.get('new_subcategory_notes'),
                 actor=current_user,
+                reuse_active=True,
             )
             db.session.commit()
             return jsonify({
@@ -181,6 +186,7 @@ def cash_flow_parties_meta():
                 payload.get('party_type') or payload.get('new_party_type') or 'person',
                 note=payload.get('note') or payload.get('new_party_note'),
                 actor=current_user,
+                reuse_active=True,
             )
             db.session.commit()
             return jsonify({
@@ -283,16 +289,65 @@ def cash_flow():
     def _back():
         return _cf_redirect(**{**filter_kwargs, 'from_date': from_date, 'to_date': to_date})
 
+    if request.method == 'POST' and action == 'restore_category':
+        # Explicit revive from the Master Data panel.  Kept separate from
+        # "add" so that typing a retired name in the Add box can never bring a
+        # suspended category back with a different direction.
+        try:
+            cat = enable_cf_category(request.form.get('category_id', type=int))
+            db.session.commit()
+            flash(f"Category '{cat.name}' restored.", 'success')
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'danger')
+        except Exception as exc:
+            db.session.rollback()
+            logger.exception('Cash flow restore category failed')
+            flash(f'Unable to restore category: {exc}', 'danger')
+        return _back()
+
+    if request.method == 'POST' and action == 'restore_subcategory':
+        try:
+            sub = enable_cf_subcategory(request.form.get('subcategory_id', type=int))
+            db.session.commit()
+            flash(f"Sub-category '{sub.name}' restored.", 'success')
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'danger')
+        except Exception as exc:
+            db.session.rollback()
+            logger.exception('Cash flow restore subcategory failed')
+            flash(f'Unable to restore sub-category: {exc}', 'danger')
+        return _back()
+
+    if request.method == 'POST' and action == 'restore_party':
+        try:
+            party = enable_cf_party(request.form.get('party_id', type=int))
+            db.session.commit()
+            flash(f"Party '{party.name}' restored.", 'success')
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'danger')
+        except Exception as exc:
+            db.session.rollback()
+            logger.exception('Cash flow restore party failed')
+            flash(f'Unable to restore party: {exc}', 'danger')
+        return _back()
+
     if request.method == 'POST' and action == 'add_category':
         try:
-            save_cf_category(
+            cat, created = save_cf_category(
                 request.form.get('new_category_name'),
                 request.form.get('new_category_direction') or 'both',
                 notes=request.form.get('new_category_notes'),
                 actor=current_user,
             )
             db.session.commit()
-            flash('Category saved.', 'success')
+            flash(
+                'Category created.' if created
+                else f"Category '{cat.name}' restored to active.",
+                'success',
+            )
         except ValueError as exc:
             db.session.rollback()
             flash(str(exc), 'danger')
@@ -304,14 +359,18 @@ def cash_flow():
 
     if request.method == 'POST' and action == 'add_subcategory':
         try:
-            save_cf_subcategory(
+            sub, created = save_cf_subcategory(
                 request.form.get('new_sub_category_id', type=int),
                 request.form.get('new_subcategory_name'),
                 notes=request.form.get('new_subcategory_notes'),
                 actor=current_user,
             )
             db.session.commit()
-            flash('Sub-category saved.', 'success')
+            flash(
+                'Sub-category created.' if created
+                else f"Sub-category '{sub.name}' restored to active.",
+                'success',
+            )
         except ValueError as exc:
             db.session.rollback()
             flash(str(exc), 'danger')
@@ -323,14 +382,18 @@ def cash_flow():
 
     if request.method == 'POST' and action == 'add_party':
         try:
-            save_cf_party(
+            party, created = save_cf_party(
                 request.form.get('new_party_name'),
                 request.form.get('new_party_type') or 'person',
                 note=request.form.get('new_party_note'),
                 actor=current_user,
             )
             db.session.commit()
-            flash('Party saved.', 'success')
+            flash(
+                'Party created.' if created
+                else f"Party '{party.name}' restored to active.",
+                'success',
+            )
         except ValueError as exc:
             db.session.rollback()
             flash(str(exc), 'danger')

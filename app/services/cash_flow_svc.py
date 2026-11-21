@@ -662,9 +662,34 @@ def _cf_write_audit(entry, action, before=None, after=None, reason=None, actor=N
     ))
 
 
+def _cf_get_id(raw):
+    """Return a positive integer id or ``None``.
+
+    ``db.session.get(Model, None)`` (and ``0``) used to be reached from every
+    master-data route because a missing form field is ``None``; SQLAlchemy
+    emits "fully NULL primary key identity cannot load any object" for that and
+    has announced it will raise.  A missing id is simply "not found".
+    """
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _cf_lookup(model, raw_id):
+    """``db.session.get`` that never queries with an empty id.
+
+    A blank id is "no such row", not "query with NULL": the latter floods the
+    log with SAWarning and is scheduled to raise in a future SQLAlchemy.
+    """
+    pk = _cf_get_id(raw_id)
+    return db.session.get(model, pk) if pk else None
+
+
 def _cf_find_category(category_id=None, name=None, active_only=True):
-    if category_id:
-        cat = db.session.get(CashFlowCategory, category_id)
+    if _cf_get_id(category_id):
+        cat = _cf_lookup(CashFlowCategory, category_id)
         if cat and (not active_only or cat.is_active):
             return cat
         return None
@@ -680,8 +705,8 @@ def _cf_find_category(category_id=None, name=None, active_only=True):
 def _cf_find_subcategory(category, subcategory_id=None, name=None, active_only=True):
     if not category:
         return None
-    if subcategory_id:
-        sub = db.session.get(CashFlowSubcategory, subcategory_id)
+    if _cf_get_id(subcategory_id):
+        sub = _cf_lookup(CashFlowSubcategory, subcategory_id)
         if sub and sub.category_id == category.id and (not active_only or sub.is_active):
             return sub
         return None
@@ -698,8 +723,8 @@ def _cf_find_subcategory(category, subcategory_id=None, name=None, active_only=T
 
 
 def _cf_find_party(party_id=None, name=None, party_type=None, active_only=True):
-    if party_id:
-        party = db.session.get(CashFlowParty, party_id)
+    if _cf_get_id(party_id):
+        party = _cf_lookup(CashFlowParty, party_id)
         if party and (not active_only or party.is_active):
             return party
         return None
@@ -714,7 +739,32 @@ def _cf_find_party(party_id=None, name=None, party_type=None, active_only=True):
     return q.first()
 
 
-def save_cf_category(name, direction='both', notes=None, actor=None):
+def save_cf_category(name, direction='both', notes=None, actor=None, revive=False,
+                     reuse_active=False):
+    """Create a category, or report that the name is already taken.
+
+    A master-data "Add" is not an edit.  It used to overwrite an existing row's
+    direction and notes with whatever the Add form happened to send, and it
+    silently un-suspended a disabled category.  That made suspension useless:
+    anyone could bring a retired category back to life — with a different
+    direction — just by typing its name again.  Now:
+
+    * an existing **active** category is reported, nothing is written;
+    * an existing **disabled** category is reported too; reviving it is an
+      explicit ``enable_cf_category`` (the Restore button), unless the caller
+      passes ``revive=True``;
+    * a brand-new name is created.
+
+    ``reuse_active=True`` makes the call idempotent instead of strict: an
+    existing **active** category is returned untouched (``created=False``).
+    That is what the JSON quick-add needs — its caller is the expense form's
+    dropdown, where "give me this category" means "make sure it exists", and
+    no field of the master is written either way.  A disabled row is still an
+    error, so reuse can never revive a suspended master.
+
+    Returns ``(category, created)`` where ``created`` is False when an existing
+    row was matched.
+    """
     name = (name or '').strip()
     direction = (direction or 'both').strip().lower()
     if not name:
@@ -723,11 +773,21 @@ def save_cf_category(name, direction='both', notes=None, actor=None):
         raise ValueError('Category direction must be Received, Spent, or Both.')
     existing = CashFlowCategory.query.filter(func.lower(CashFlowCategory.name) == name.lower()).first()
     if existing:
-        if not existing.is_active:
-            existing.is_active = True
-        existing.direction = direction
-        if notes is not None:
-            existing.notes = (notes or '').strip() or None
+        if not existing.is_active and not revive:
+            raise ValueError(
+                f"Category '{existing.name}' already exists but is disabled. "
+                'Restore it from Master Data Management instead of adding it again.'
+            )
+        if existing.is_active:
+            if reuse_active:
+                return existing, False
+            raise ValueError(
+                f"Category '{existing.name}' already exists. "
+                'Edit or disable it from Master Data Management instead.'
+            )
+        # Explicit revive: keep the stored direction/notes — the operator is
+        # restoring a known master, not re-defining it.
+        existing.is_active = True
         existing.updated_at = pk_now()
         db.session.flush()
         return existing, False
@@ -740,22 +800,44 @@ def save_cf_category(name, direction='both', notes=None, actor=None):
     return cat, True
 
 
-def save_cf_subcategory(category_id, name, notes=None, actor=None):
+def save_cf_subcategory(category_id, name, notes=None, actor=None, revive=False,
+                        reuse_active=False):
+    """Create a sub-category, or report that the name is already taken.
+
+    Same contract as :func:`save_cf_category`: an existing active sub-category
+    is reported (nothing is overwritten) and a disabled one is restored only
+    when ``revive=True``.  The parent must be an existing **active** category —
+    a new sub-category under a suspended parent would be invisible everywhere
+    except in the very panel that created it.
+    """
     name = (name or '').strip()
-    cat = db.session.get(CashFlowCategory, category_id) if category_id else None
+    cat = _cf_lookup(CashFlowCategory, category_id) if category_id else None
     if not cat:
         raise ValueError('Pick a parent category.')
     if not name:
         raise ValueError('Sub-category name is required.')
+    if not cat.is_active:
+        raise ValueError(
+            f"Category '{cat.name}' is disabled. Restore it before adding sub-categories."
+        )
     existing = CashFlowSubcategory.query.filter(
         CashFlowSubcategory.category_id == cat.id,
         func.lower(CashFlowSubcategory.name) == name.lower(),
     ).first()
     if existing:
-        if not existing.is_active:
-            existing.is_active = True
-        if notes is not None:
-            existing.notes = (notes or '').strip() or None
+        if not existing.is_active and not revive:
+            raise ValueError(
+                f"Sub-category '{existing.name}' already exists under {cat.name} but is disabled. "
+                'Restore it from Master Data Management instead of adding it again.'
+            )
+        if existing.is_active:
+            if reuse_active:
+                return existing, False
+            raise ValueError(
+                f"Sub-category '{existing.name}' already exists under {cat.name}. "
+                'Edit or disable it from Master Data Management instead.'
+            )
+        existing.is_active = True
         existing.updated_at = pk_now()
         db.session.flush()
         return existing, False
@@ -768,19 +850,27 @@ def save_cf_subcategory(category_id, name, notes=None, actor=None):
     return sub, True
 
 
-def save_cf_party(name, party_type='person', note=None, actor=None):
+def save_cf_party(name, party_type='person', note=None, actor=None, reuse_active=False):
     name = (name or '').strip()
     party_type = (party_type or 'other').strip().lower() or 'other'
     if not name:
         raise ValueError('Name is required.')
     existing = _cf_find_party(name=name, party_type=party_type, active_only=False)
     if existing:
-        existing.is_active = True
-        if note is not None:
-            existing.note = (note or '').strip() or None
-        existing.updated_at = pk_now()
-        db.session.flush()
-        return existing, False
+        # Match the category/sub-category contract: never rewrite or revive an
+        # existing master from the Add form.  The party panel has its own
+        # Update / Disable / Restore actions.
+        if existing.is_active:
+            if reuse_active:
+                return existing, False
+            raise ValueError(
+                f"Party '{existing.name}' already exists. "
+                'Edit or disable it from Master Data Management instead.'
+            )
+        raise ValueError(
+            f"Party '{existing.name}' already exists but is disabled. "
+            'Restore it from Master Data Management instead of adding it again.'
+        )
     party = CashFlowParty(
         name=name, party_type=party_type, note=(note or '').strip() or None,
         is_active=True, created_at=pk_now(), updated_at=pk_now(),
@@ -791,7 +881,7 @@ def save_cf_party(name, party_type='person', note=None, actor=None):
 
 
 def disable_cf_category(category_id):
-    cat = db.session.get(CashFlowCategory, category_id)
+    cat = _cf_lookup(CashFlowCategory, category_id)
     if not cat:
         raise ValueError('Category not found.')
     cat.is_active = False
@@ -801,7 +891,7 @@ def disable_cf_category(category_id):
 
 
 def enable_cf_category(category_id):
-    cat = db.session.get(CashFlowCategory, category_id)
+    cat = _cf_lookup(CashFlowCategory, category_id)
     if not cat:
         raise ValueError('Category not found.')
     cat.is_active = True
@@ -811,7 +901,7 @@ def enable_cf_category(category_id):
 
 
 def disable_cf_subcategory(subcategory_id):
-    sub = db.session.get(CashFlowSubcategory, subcategory_id)
+    sub = _cf_lookup(CashFlowSubcategory, subcategory_id)
     if not sub:
         raise ValueError('Sub-category not found.')
     sub.is_active = False
@@ -821,7 +911,7 @@ def disable_cf_subcategory(subcategory_id):
 
 
 def enable_cf_subcategory(subcategory_id):
-    sub = db.session.get(CashFlowSubcategory, subcategory_id)
+    sub = _cf_lookup(CashFlowSubcategory, subcategory_id)
     if not sub:
         raise ValueError('Sub-category not found.')
     sub.is_active = True
@@ -831,7 +921,7 @@ def enable_cf_subcategory(subcategory_id):
 
 
 def disable_cf_party(party_id):
-    party = db.session.get(CashFlowParty, party_id)
+    party = _cf_lookup(CashFlowParty, party_id)
     if not party:
         raise ValueError('Party not found.')
     party.is_active = False
@@ -841,7 +931,7 @@ def disable_cf_party(party_id):
 
 
 def enable_cf_party(party_id):
-    party = db.session.get(CashFlowParty, party_id)
+    party = _cf_lookup(CashFlowParty, party_id)
     if not party:
         raise ValueError('Party not found.')
     party.is_active = True
@@ -851,7 +941,7 @@ def enable_cf_party(party_id):
 
 
 def update_cf_party(party_id, name, party_type=None, note=None):
-    party = db.session.get(CashFlowParty, party_id)
+    party = _cf_lookup(CashFlowParty, party_id)
     if not party:
         raise ValueError('Party not found.')
     name = (name or '').strip()
@@ -868,7 +958,7 @@ def update_cf_party(party_id, name, party_type=None, note=None):
 
 
 def rename_cf_category(category_id, name, direction=None, notes=None):
-    cat = db.session.get(CashFlowCategory, category_id)
+    cat = _cf_lookup(CashFlowCategory, category_id)
     if not cat:
         raise ValueError('Category not found.')
     name = (name or '').strip()
@@ -891,7 +981,7 @@ def rename_cf_category(category_id, name, direction=None, notes=None):
 
 
 def rename_cf_subcategory(subcategory_id, name, notes=None):
-    sub = db.session.get(CashFlowSubcategory, subcategory_id)
+    sub = _cf_lookup(CashFlowSubcategory, subcategory_id)
     if not sub:
         raise ValueError('Sub-category not found.')
     name = (name or '').strip()
@@ -913,10 +1003,26 @@ def rename_cf_subcategory(subcategory_id, name, notes=None):
 
 
 def cf_used_category_ids():
+    """Category ids any history row refers to — directly or through a sub-category.
+
+    The page uses this to decide whether Delete may be offered.  Counting only
+    ``cash_flow_entry.category_id`` hid the most common case in the shop: an
+    expense classified as Category + Sub-category, where the entry points at the
+    sub-category.  The button looked enabled, and pressing it was refused.
+    """
     rows = db.session.query(CashFlowEntry.category_id).filter(
         CashFlowEntry.category_id.isnot(None)
     ).distinct().all()
-    return {row[0] for row in rows}
+    used = {row[0] for row in rows}
+    via_sub = db.session.query(CashFlowSubcategory.category_id).filter(
+        CashFlowSubcategory.id.in_(
+            db.session.query(CashFlowEntry.subcategory_id).filter(
+                CashFlowEntry.subcategory_id.isnot(None)
+            )
+        )
+    ).distinct().all()
+    used.update(row[0] for row in via_sub)
+    return used
 
 
 def cf_used_subcategory_ids():
@@ -948,7 +1054,7 @@ def _cf_category_is_used(category_id):
 
 def delete_cf_category(category_id):
     """Hard-delete an unused category. Historically used categories must be disabled."""
-    cat = db.session.get(CashFlowCategory, category_id)
+    cat = _cf_lookup(CashFlowCategory, category_id)
     if not cat:
         raise ValueError('Category not found.')
     linked_modules = []
@@ -970,9 +1076,18 @@ def delete_cf_category(category_id):
         msg = 'This category is linked to: ' + ', '.join(linked_modules) if linked_modules else 'This category is used by historical transactions.'
         msg += ' Cannot delete — disable it instead, or delete from the linked modules first.'
         raise ValueError(msg)
-    CashFlowSubcategory.query.filter(CashFlowSubcategory.category_id == cat.id).delete(
-        synchronize_session=False
-    )
+    # Remove the children through the relationship, not a bulk DELETE.  A bulk
+    # DELETE leaves any already-loaded ``subcategories`` collection holding rows
+    # whose parent was just removed — the session then writes those children
+    # back (or, on Postgres, the parent DELETE hits the still-present FK rows
+    # and fails).  Deleting each child through the session keeps both sides of
+    # the relationship in step and still sends exactly one DELETE per row.
+    children = CashFlowSubcategory.query.filter(
+        CashFlowSubcategory.category_id == cat.id
+    ).all() if sub_ids else []
+    for child in children:
+        db.session.delete(child)
+    db.session.flush()
     db.session.delete(cat)
     db.session.flush()
     return True
@@ -980,7 +1095,7 @@ def delete_cf_category(category_id):
 
 def delete_cf_subcategory(subcategory_id):
     """Hard-delete an unused sub-category. Historically used ones must be disabled."""
-    sub = db.session.get(CashFlowSubcategory, subcategory_id)
+    sub = _cf_lookup(CashFlowSubcategory, subcategory_id)
     if not sub:
         raise ValueError('Sub-category not found.')
     linked_modules = []
@@ -997,7 +1112,7 @@ def delete_cf_subcategory(subcategory_id):
 
 def delete_cf_party(party_id):
     """Hard-delete an unused party. Historically used parties must be disabled."""
-    party = db.session.get(CashFlowParty, party_id)
+    party = _cf_lookup(CashFlowParty, party_id)
     if not party:
         raise ValueError('Party not found.')
     linked_modules = []
@@ -1055,9 +1170,18 @@ def _cf_resolve_category(direction, category_id, category_name, *, required, cre
         raise ValueError('Category is required for Received and Spent.')
     if category_id and not cat:
         raise ValueError('Selected category is missing or inactive.')
-    if name and create_if_missing:
-        cat, _ = save_cf_category(name, direction=direction)
-        return cat
+    if name:
+        # A disabled category still owns its name.  Saving the entry under it
+        # would either resurrect a retired master or silently drop the
+        # classification the operator typed, so say what is wrong instead.
+        inactive = _cf_find_category(name=name, active_only=False)
+        if inactive:
+            raise ValueError(
+                f"Category '{inactive.name}' is disabled. Restore it or pick another category."
+            )
+        if create_if_missing:
+            cat, _ = save_cf_category(name, direction=direction)
+            return cat
     if required:
         raise ValueError('Category must exist and be active. Create it in Categories first.')
     return None
@@ -1074,10 +1198,15 @@ def _cf_resolve_subcategory(category, subcategory_id, subcategory_name, *, creat
     if subcategory_id:
         raise ValueError('Sub-category does not belong to the selected category.')
     name = (subcategory_name or '').strip()
-    if name and create_if_missing:
-        sub, _ = save_cf_subcategory(category.id, name)
-        return sub
     if name:
+        inactive = _cf_find_subcategory(category, name=name, active_only=False)
+        if inactive:
+            raise ValueError(
+                f"Sub-category '{inactive.name}' is disabled. Restore it or pick another sub-category."
+            )
+        if create_if_missing:
+            sub, _ = save_cf_subcategory(category.id, name)
+            return sub
         raise ValueError('Sub-category must belong to the selected category.')
     return None
 

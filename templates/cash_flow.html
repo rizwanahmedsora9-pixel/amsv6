@@ -656,7 +656,7 @@
   <details class="ui-card mb-4 d-print-none">
     <summary class="ui-card-header" style="cursor:pointer;">
       <h5 class="mb-0 d-inline"><i class="bi bi-sliders2 me-2 text-warning"></i> Master Data Management</h5>
-      <small class="text-muted ms-2">Manage categories, sub-categories, and parties. History is preserved if disabled.</small>
+      <small class="text-muted ms-2">Manage categories, sub-categories, and parties. <strong>Edit</strong> renames in place and history follows the row. <strong>Disable</strong> suspends a master (reversible, history keeps the name). <strong>Delete</strong> is only offered for a master no entry uses. A disabled master cannot be picked for a new entry and is never revived by typing its name.</small>
     </summary>
     <div class="ui-card-body">
       <div class="row g-3 mb-4">
@@ -743,9 +743,9 @@
                   <div class="col-md-3 d-flex gap-1 flex-wrap">
                     <button class="btn btn-sm btn-outline-secondary" name="action" value="rename_category" type="submit">Save</button>
                     {% if c.is_active %}
-                    <button class="btn btn-sm btn-outline-warning" name="action" value="disable_category" type="submit">Disable</button>
+                    <button class="btn btn-sm btn-outline-warning" name="action" value="disable_category" type="submit" title="Suspend this category. History keeps the name and you can restore it later.">Disable</button>
                     {% else %}
-                    <button class="btn btn-sm btn-outline-success" name="action" value="enable_category" type="submit">Restore</button>
+                    <button class="btn btn-sm btn-outline-success" name="action" value="restore_category" type="submit" title="Make this category selectable again.">Restore</button>
                     {% endif %}
                     {% if c.id in (used_category_ids or []) %}
                     <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="Used by historical transactions. Disable instead of deleting.">Delete</button>
@@ -781,9 +781,9 @@
                   <div class="col-md-3 d-flex gap-1 flex-wrap">
                     <button class="btn btn-sm btn-outline-secondary" name="action" value="rename_subcategory" type="submit">Save</button>
                     {% if s.is_active %}
-                    <button class="btn btn-sm btn-outline-warning" name="action" value="disable_subcategory" type="submit">Disable</button>
+                    <button class="btn btn-sm btn-outline-warning" name="action" value="disable_subcategory" type="submit" title="Suspend this sub-category. History keeps the name and you can restore it later.">Disable</button>
                     {% else %}
-                    <button class="btn btn-sm btn-outline-success" name="action" value="enable_subcategory" type="submit">Restore</button>
+                    <button class="btn btn-sm btn-outline-success" name="action" value="restore_subcategory" type="submit" title="Make this sub-category selectable again.">Restore</button>
                     {% endif %}
                     {% if s.id in (used_subcategory_ids or []) %}
                     <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="Used by historical transactions. Disable instead of deleting.">Delete</button>
@@ -825,9 +825,9 @@
                   <div class="col-md-3 d-flex gap-1 flex-wrap">
                     <button class="btn btn-sm btn-outline-secondary" name="action" value="update_party" type="submit">Save</button>
                     {% if p.is_active %}
-                    <button class="btn btn-sm btn-outline-warning" name="action" value="disable_party" type="submit">Disable</button>
+                    <button class="btn btn-sm btn-outline-warning" name="action" value="disable_party" type="submit" title="Suspend this party. History keeps the name and you can restore it later.">Disable</button>
                     {% else %}
-                    <button class="btn btn-sm btn-outline-success" name="action" value="enable_party" type="submit">Restore</button>
+                    <button class="btn btn-sm btn-outline-success" name="action" value="restore_party" type="submit" title="Make this party selectable again.">Restore</button>
                     {% endif %}
                     {% if p.id in (used_party_ids or []) %}
                     <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="Used by historical transactions. Disable instead of deleting.">Delete</button>
