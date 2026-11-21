@@ -100,6 +100,66 @@ def _finalise_financial_history(financial_history, parse_dt):
     return ordered
 
 
+def _financial_bill_outstanding(financial_history):
+    """Allocate ledger credits FIFO and return remaining billed amounts.
+
+    The opening client credit is treated as an available credit against the
+    oldest bill, just like later receipts and waive-offs. Booking rows remain
+    full-value obligations; delivery quantities are a separate material view.
+    """
+    obligations = []
+    remaining_by_source = {}
+    remaining_by_reference = {}
+    available_credit = Decimal('0.00')
+    cursor = 0
+
+    def apply_credit():
+        nonlocal available_credit, cursor
+        while available_credit > 0 and cursor < len(obligations):
+            obligation = obligations[cursor]
+            if obligation['remaining'] <= 0:
+                cursor += 1
+                continue
+            applied = min(available_credit, obligation['remaining'])
+            obligation['remaining'] -= applied
+            available_credit -= applied
+            if obligation['remaining'] <= 0:
+                cursor += 1
+
+    for row in financial_history:
+        debit = Decimal(str(row.get('debit') or 0))
+        credit = Decimal(str(row.get('credit') or 0))
+        if row.get('bill_no') == 'OPENING':
+            available_credit += credit
+            apply_credit()
+            continue
+
+        row_type = row.get('type')
+        if row_type in {'Booking', 'DirectSale'}:
+            remaining = max(Decimal('0.00'), debit - credit)
+            surplus = max(Decimal('0.00'), credit - debit)
+            key = (row_type, row.get('id'))
+            obligation = {
+                'key': key,
+                'reference': str(row.get('bill_no') or '').strip().casefold(),
+                'remaining': remaining,
+            }
+            obligations.append(obligation)
+            remaining_by_source[key] = obligation
+            if obligation['reference']:
+                remaining_by_reference[obligation['reference']] = obligation
+            available_credit += surplus
+            apply_credit()
+        else:
+            available_credit += credit
+            apply_credit()
+
+    return {
+        'by_source': {key: float(row['remaining']) for key, row in remaining_by_source.items()},
+        'by_reference': {key: float(row['remaining']) for key, row in remaining_by_reference.items()},
+    }
+
+
 def build_client_material_analysis(client_name_norm, materials=None, services=None,
                                    client_code=None):
     """Material-wise and category-wise analysis of a client's billed ledger lines.
@@ -558,15 +618,13 @@ def financial_ledger(client_id):
         credit = b.paid_amount or 0
         discount = getattr(b, 'discount', 0) or 0
 
-        # Delivered / undelivered split -------------------------------------
-        # The booking line is the client's single charge; the bags leave in
-        # instalments.  Post the *delivered* part as the receivable and hold
-        # the undelivered part as a zero-amount note, so the same rupee is
-        # never charged twice.  A delivery that nobody has valued yet stays on
-        # the document row (previously: the whole booking, as before).
+        # A booking is a full financial obligation when it is entered, even
+        # while some goods are awaiting dispatch. Keep the undelivered value as
+        # an informational delivery-tracking note; do not remove it from the
+        # booking debit or add it a second time.
         undelivered_amount = 0.0
         undelivered_qty = 0.0
-        delivered_note = ''
+        booking_items = []
         if not discount:
             try:
                 booking_items = BookingItem.query.filter_by(booking_id=b.id).order_by(BookingItem.id.asc()).all()
@@ -574,8 +632,9 @@ def financial_ledger(client_id):
                 booking_items = []
             parts_total = sum(float(getattr(it, 'qty', 0) or 0) * float(getattr(it, 'price_at_time', 0) or 0)
                               for it in booking_items)
-            # Only split when the lines explain the document, so a header-level
-            # adjustment can never be silently reclassified as delivered.
+            # Only report a delivery split when item values reconcile to the
+            # booking header. The split is informational; the whole booking
+            # remains in the financial debit.
             if booking_items and abs(parts_total - float(b.amount or 0)) <= 0.01:
                 split = _booking_delivered_split(client)
                 for it in booking_items:
@@ -585,31 +644,30 @@ def financial_ledger(client_id):
                         undelivered_amount += float(line.get('undelivered_amount') or 0)
                     except (TypeError, ValueError):
                         pass
-                if undelivered_amount > 0 and float(b.amount or 0) - undelivered_amount >= 0:
-                    delivered_amount = _money_round(Decimal(str(float(b.amount or 0) - undelivered_amount)))
-                    if delivered_amount > 0:
-                        delivered_note = 'Goods delivered — billed against this booking'
-                        debit = delivered_amount
-                    else:
-                        debit = 0
-                        delivered_note = 'No goods delivered yet — whole booking still undelivered'
+                undelivered_amount = min(max(0.0, undelivered_amount), max(0.0, float(b.amount or 0)))
+
+        booking_note = (b.note or '').strip()
+        if undelivered_amount > 0:
+            delivery_note = (
+                f"Rs. {undelivered_amount:,.2f} remains undelivered; "
+                'this amount is already included in the booking debit.'
+            )
+            booking_note = f"{booking_note} — {delivery_note}" if booking_note else delivery_note
 
         financial_history.append({
             'date': b.date_posted,
             'date_display': _fmt_dt(b.date_posted),
             'description': 'Booking',
             'bill_no': booking_bill_ref,
-            'note': delivered_note or (b.note or '').strip(),
+            'note': booking_note,
             'debit': debit,
             'credit': credit,
             'type': 'Booking',
             'id': b.id
         })
         if undelivered_amount > 0:
-            # Informational only: the undelivered bags are still owed to the
-            # client, but charging them again would double the same rupee.
-            # Zero debit/credit keeps every total and running balance intact;
-            # the cancel preview (cancel_rows) is what actually writes it off.
+            # Informational only: delivery status is tracked here, but this
+            # value is already included in the booking debit above.
             financial_history.append({
                 'date': b.date_posted,
                 'date_display': _fmt_dt(b.date_posted),
@@ -620,14 +678,14 @@ def financial_ledger(client_id):
                 'bill_no': booking_bill_ref,
                 'note': (
                     f"Still to be delivered — Rs. {undelivered_amount:,.2f}. "
-                    'Held separately; not part of the delivered receivable.'
+                    'Included in the booking amount and Net Balance; tracking only.'
                 ),
                 'debit': 0,
                 'credit': 0,
                 'type': None,
                 'id': None,
                 'is_undelivered_note': True,
-                # Carried for the header tile; never added to debit/credit.
+                # Carried for the header tile; never added a second time.
                 'undelivered_amount': undelivered_amount
             })
         if float(discount or 0) > 0:
@@ -1113,6 +1171,31 @@ def financial_ledger(client_id):
     # dispatches). Recompute running balances so every rendered row has `balance`.
     financial_history = _finalise_financial_history(financial_history, _parse_dt)
 
+    # The pending-bill panel should show the amount still due after opening
+    # credit and subsequent ledger credits, not just the bill's original gross.
+    bill_outstanding = _financial_bill_outstanding(financial_history)
+    for pb in pending_bills:
+        original_amount = _money_round(getattr(pb, 'amount', 0) or 0)
+        pb.display_original_amount = float(original_amount)
+        pb.display_amount = float(original_amount)
+        source_table = (getattr(pb, 'source_table', None) or '').strip().lower()
+        source_id = getattr(pb, 'source_id', None)
+        source_type = {'booking': 'Booking', 'direct_sale': 'DirectSale'}.get(source_table)
+        outstanding = None
+        if source_type and source_id is not None:
+            outstanding = bill_outstanding['by_source'].get((source_type, source_id))
+        if outstanding is None:
+            ref = str(getattr(pb, 'bill_no', None) or '').strip().casefold()
+            outstanding = bill_outstanding['by_reference'].get(ref)
+        if outstanding is not None:
+            pb.display_amount = _money_round(outstanding)
+        if bool(getattr(pb, 'is_paid', False)):
+            pb.display_status = 'Paid'
+        elif pb.display_amount <= 0.005:
+            pb.display_status = 'Covered by ledger credits'
+        else:
+            pb.display_status = 'Pending'
+
     # Sort by date (oldest first)
     # Sort by date, then by type priority (Booking/Add before Dispatch) to ensure balance doesn't dip
     def mat_sort_key(x):
@@ -1160,9 +1243,8 @@ def financial_ledger(client_id):
     total_credit = _money_round(total_credit)
     total_balance = _money_round(total_balance)
 
-    # Undelivered booking value, held apart from the delivered receivable.
-    # It is deliberately NOT added to the net balance: the client owes it, but
-    # it only becomes a receivable once the bags actually leave the shop.
+    # Undelivered booking value is shown separately for dispatch tracking, but
+    # is already included in the full booking debit and therefore in Net Balance.
     undelivered_total = _money_round(Decimal(str(sum(
         float(row.get('undelivered_amount') or 0)
         for row in financial_history
@@ -1268,15 +1350,9 @@ def financial_ledger(client_id):
     )
     cancel_total = _money_round(cancel_total)
     # What cancelling the leftover booking would do to the client's account.
-    #
-    # The delivered/undelivered split above means ``total_balance`` now holds
-    # only the DELIVERED receivable, while ``cancel_total`` values the bags that
-    # were never delivered.  Subtracting one from the other would pay the client
-    # back money they never handed over (their advance already sits in credit).
-    # The pre-split balance is therefore rebuilt by adding the undelivered value
-    # back; that is the same figure this preview was computed from before, so
-    # the cancel outcome is unchanged.
-    cancel_base_balance = Decimal(str(total_balance)) + Decimal(str(undelivered_total or 0))
+    # The full booking is already in total_balance, so cancellation removes only
+    # the value of the undelivered quantity and must not add it a second time.
+    cancel_base_balance = Decimal(str(total_balance))
     cancel_new_balance = _money_round(cancel_base_balance - Decimal(str(cancel_total)))
     cancel_client_due = max(0, cancel_new_balance)
     cancel_company_due = max(0, -cancel_new_balance)
