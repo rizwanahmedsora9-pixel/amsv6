@@ -124,7 +124,7 @@
         <div class="cl-stat">
             <div class="cl-stat-label"><i class="bi bi-hourglass-split"></i>Undelivered Booking</div>
             <div class="cl-stat-value">{{ "{:,.2f}".format(undelivered_total or 0) }}</div>
-            <div class="cl-stat-sub">Still to be delivered — held separately, not in Net Balance</div>
+            <div class="cl-stat-sub">Still to be delivered; already included in booking due</div>
         </div>
         {% endif %}
     </div>
@@ -817,7 +817,7 @@ function submitCancelSelection{{ client.id }}() {
                     <thead style="background: #020617;">
                         <tr>
                             <th class="ps-3">Bill #</th>
-                            <th class="text-end">Amount</th>
+                            <th class="text-end">Pending Amount</th>
                             <th>Status</th>
                             <th class="pe-3">Reason</th>
                         </tr>
@@ -830,10 +830,17 @@ function submitCancelSelection{{ client.id }}() {
                                 <a href="{{ url_for('view_bill', bill_no=b.bill_no|replace('#', '%23')) }}" class="text-warning text-decoration-none">{{ b.bill_no }}</a>
                                 {% endif %}
                             </td>
-                            <td class="text-end text-danger fw-bold" data-label="Amount">{{ "{:,.0f}".format(b.amount) }}</td>
+                            <td class="text-end fw-bold {{ 'text-danger' if (b.display_amount or 0) > 0.005 else 'text-success' }}" data-label="Pending Amount">
+                                {{ "{:,.0f}".format(b.display_amount or 0) }}
+                                {% if b.display_original_amount is defined and b.display_original_amount != b.display_amount %}
+                                <div class="small text-white-50 fw-normal">Bill total: {{ "{:,.0f}".format(b.display_original_amount) }}</div>
+                                {% endif %}
+                            </td>
                             <td data-label="Status">
-                                {% if b.is_paid %}
+                                {% if b.display_status == 'Paid' %}
                                 <span class="badge bg-success">Paid</span>
+                                {% elif b.display_status == 'Covered by ledger credits' %}
+                                <span class="badge bg-secondary">Covered by credits</span>
                                 {% else %}
                                 <span class="badge bg-danger">Pending</span>
                                 {% endif %}
