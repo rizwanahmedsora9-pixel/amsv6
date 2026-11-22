@@ -106,6 +106,11 @@ def add_direct_sale():
     alternate_list = request.form.getlist('alternate_material[]')
     qtys = request.form.getlist('qty[]')
     rates = request.form.getlist('unit_rate[]')
+    # Open Cement keg helper: kegs x kg/keg -> KG.  Kept aligned with the row
+    # lists above and only ever applied to Open Cement items (see
+    # resolve_open_cement_item).
+    keg_qtys = request.form.getlist('keg_qty[]')
+    keg_kgs = request.form.getlist('keg_kg[]')
     grn_item_ids = request.form.getlist('grn_item_id[]')
     ignore_items = request.form.getlist('ignore_booking_item[]')
     # amount = float(request.form.get('amount', 0) or 0) # Recalculated below
@@ -354,16 +359,24 @@ def add_direct_sale():
         try:
             # service_id is a separate channel on purpose: service ids overlap
             # material ids, so a service id must never reach the unqualified
-            # Material PK lookup.
-            _kind, mat_obj = resolve_transaction_item(
+            # Material PK lookup.  Open Cement rows additionally take their KG
+            # quantity from the keg helper (server-side, not trusted JS).
+            _kind, mat_obj = resolve_open_cement_item(
                 service_id=sid,
                 material_id=mid,
                 typed_text=mat_name_in,
                 require_active=True,
+                keg_qty=(keg_qtys[idx] if idx < len(keg_qtys) else None),
+                keg_kg=(keg_kgs[idx] if idx < len(keg_kgs) else None),
             )
         except ValueError as ve:
             return _fail_sale(str(ve))
         if not mat_obj or qty <= 0:
+            continue
+        keg_kg_qty = getattr(mat_obj, '_keg_derived_kg', None)
+        if keg_kg_qty is not None:
+            qty = _to_float_or_zero(keg_kg_qty)
+        if qty <= 0:
             continue
         mat_name = mat_obj.name
         rate = _to_float_or_zero(rate_val)

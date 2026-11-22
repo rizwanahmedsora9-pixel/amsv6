@@ -191,6 +191,7 @@ def _bill_counter_sources():
         (GRN, 'auto_bill_no', AUTO_BILL_NAMESPACES['GRN']),
         (Entry, 'auto_bill_no', AUTO_BILL_NAMESPACES['ENTRY']),
         (StockAdjustment, 'reference', AUTO_BILL_NAMESPACES['STOCK_ADJUSTMENT']),
+        (CementConversion, 'reference', AUTO_BILL_NAMESPACES['CEMENT_CONVERSION']),
     ]
 
 

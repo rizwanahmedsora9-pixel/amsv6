@@ -174,6 +174,8 @@ def edit_direct_sale(id):
         alternate_ids = request.form.getlist('alternate_material_id[]')
         qtys = request.form.getlist('qty[]')
         rates = request.form.getlist('unit_rate[]')
+        keg_qtys = request.form.getlist('keg_qty[]')
+        keg_kgs = request.form.getlist('keg_kg[]')
         grn_item_ids = request.form.getlist('grn_item_id[]')
         ignore_items = request.form.getlist('ignore_booking_item[]')
 
@@ -276,18 +278,24 @@ def edit_direct_sale(id):
             try:
                 # Alternate resolution below intentionally stays on
                 # resolve_transaction_material — a service can never be the
-                # physical substitute delivered for booked goods.
-                _kind, mat_obj = resolve_transaction_item(
+                # physical substitute delivered for booked goods.  Open Cement
+                # rows derive their KG quantity from the keg helper.
+                _kind, mat_obj = resolve_open_cement_item(
                     service_id=sid,
                     material_id=mid,
                     typed_text=mat_name_in,
                     require_active=True,
                     allow_inactive_names=historical_product_names,
+                    keg_qty=(keg_qtys[idx] if idx < len(keg_qtys) else None),
+                    keg_kg=(keg_kgs[idx] if idx < len(keg_kgs) else None),
                 )
             except ValueError as ve:
                 return _fail_edit(str(ve))
             if not mat_obj:
                 return _fail_edit(MATERIAL_NOT_SELECTED_MSG)
+            keg_kg_qty = getattr(mat_obj, '_keg_derived_kg', None)
+            if keg_kg_qty is not None:
+                qty_val = _to_float_or_zero(keg_kg_qty)
             if qty_val <= 0:
                 continue
             rate_val = _to_float_or_zero(rate)

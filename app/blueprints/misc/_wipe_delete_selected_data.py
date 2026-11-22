@@ -417,8 +417,26 @@ def delete_selected_data():
             deleted_info.append('Rent & Service Charges')
 
         if 'material_categories' in targets:
-            _tq(Material).update({'category_id': None}, synchronize_session=False)
-            _tq(MaterialCategory).delete()
+            # The reserved "Open Cement" category is system-managed: it is
+            # recreated at bootstrap and its items depend on it, so a data
+            # wipe must preserve it (and keep its items categorised).
+            from app.services.open_cement import (
+                ensure_open_cement_category, open_cement_category, open_cement_materials,
+            )
+            ensure_open_cement_category()
+            reserved = open_cement_category()
+            open_ids = [m.id for m in open_cement_materials()]
+            if reserved is not None:
+                others = _tq(Material)
+                if open_ids:
+                    others = others.filter(Material.id.notin_(open_ids))
+                others.update({'category_id': None}, synchronize_session=False)
+                _tq(MaterialCategory).filter(MaterialCategory.id != reserved.id).delete(
+                    synchronize_session=False
+                )
+            else:
+                _tq(Material).update({'category_id': None}, synchronize_session=False)
+                _tq(MaterialCategory).delete()
             deleted_info.append('Material Categories')
 
         if 'clients' in targets:

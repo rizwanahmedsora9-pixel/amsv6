@@ -258,9 +258,18 @@ def direct_sales_page():
     resume_mode = (request.args.get('resume') or '').strip().lower()
     hold_drafts = DirectSaleDraft.query.order_by(DirectSaleDraft.updated_at.desc()).limit(200).all()
 
+    # Open Cement items are stocked in KG but may be sold by the keg; the sheet
+    # offers a keg helper on exactly those rows (the posted qty is still KG).
+    try:
+        from app.services.open_cement import open_cement_materials
+        open_cement_material_names = [m.name for m in open_cement_materials()]
+    except Exception:
+        open_cement_material_names = []
+
     return render_template('direct_sales.html',
                            sales=sales,
                            materials=materials,
+                           open_cement_material_names=open_cement_material_names,
                            alt_materials=[m for m in materials if not is_service_name(m.name)],
                            services=Service.query.filter_by(is_active=True).order_by(Service.name.asc()).all(),
                            clients=clients,

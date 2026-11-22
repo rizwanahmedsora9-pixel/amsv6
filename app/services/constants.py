@@ -440,6 +440,12 @@ ENDPOINT_PERMISSION_MAP = {
     'inventory.lost_ledger_delete': 'can_view_stock',
     'inventory.lost_ledger_export': 'can_view_stock',
     'inventory.lost_ledger_material_info': 'can_view_stock',
+    'inventory.cement_conversion': 'can_view_stock',
+    'inventory.cement_conversion_preview': 'can_view_stock',
+    'inventory.cement_conversion_save': 'can_view_stock',
+    'inventory.cement_conversion_detail': 'can_view_stock',
+    'inventory.cement_conversion_reverse': 'can_view_stock',
+    'inventory.cement_conversion_history': 'can_view_stock',
     'inventory.daily_transactions': 'can_view_daily',
     'inventory.inventory_log': 'can_view_history',
 
@@ -548,6 +554,7 @@ AUTO_BILL_NAMESPACES = {
     'GRN_PAYMENT': 'GP',
     'ENTRY': 'EN',
     'STOCK_ADJUSTMENT': 'SA',
+    'CEMENT_CONVERSION': 'CC',
 }
 
 EDITABLE_USER_PERMISSION_FIELDS = [

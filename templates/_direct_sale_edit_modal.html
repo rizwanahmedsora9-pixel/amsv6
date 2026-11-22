@@ -173,7 +173,7 @@
                                         </div>
                                         <div id="editSaleMaterialList{{ sale.id }}_{{ loop.index0 }}" class="combobox-list shadow-lg" style="display: none;">
                                             {% for mat in materials %}
-                                            <div class="combobox-item" data-material-id="{{ mat.id }}" data-combo-code="{{ mat.name }}" data-combo-name="{{ mat.name }}" data-combo-input="editSaleMaterialSearch{{ sale.id }}_{{ loop.index0 }}" data-combo-display="editSaleMaterialDisplay{{ sale.id }}_{{ loop.index0 }}" data-combo-after="onSaleMaterialPicked">
+                                            <div class="combobox-item" data-material-id="{{ mat.id }}" data-open-cement="{{ '1' if mat.category and mat.category.name|lower == 'open cement' else '0' }}" data-combo-code="{{ mat.name }}" data-combo-name="{{ mat.name }}" data-combo-input="editSaleMaterialSearch{{ sale.id }}_{{ loop.index0 }}" data-combo-display="editSaleMaterialDisplay{{ sale.id }}_{{ loop.index0 }}" data-combo-after="onSaleMaterialPicked">
                                                 <span class="fw-bold text-warning code-span">{{ mat.name }}</span>
                                             </div>
                                             {% endfor %}
@@ -229,6 +229,13 @@
                                             <button class="btn btn-outline-secondary btn-sm" type="button" onclick="changeSaleQty(this, -1)">-</button>
                                             <input type="number" step="any" name="qty[]" value="{{ item.qty }}" class="form-control bg-dark text-white border-secondary text-center qty-input" style="font-size: 1.05rem; font-weight: 700; padding: 0.475rem 0.5rem;" required>
                                             <button class="btn btn-outline-secondary btn-sm" type="button" onclick="changeSaleQty(this, 1)">+</button>
+                                        </div>
+                                        <div class="keg-helper mt-1" style="display:none;" title="Open Cement: sell by keg">
+                                            <div class="input-group input-group-sm">
+                                                <input type="number" step="any" min="0" name="keg_qty[]" class="form-control bg-dark text-white border-secondary keg-qty" placeholder="Kegs">
+                                                <span class="input-group-text bg-dark text-white border-secondary small">×</span>
+                                                <input type="number" step="any" min="0" name="keg_kg[]" class="form-control bg-dark text-white border-secondary keg-kg" placeholder="kg/keg" value="50">
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="rate-cell position-relative">

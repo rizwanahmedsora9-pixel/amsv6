@@ -53,6 +53,8 @@ from models import (
     BookingAllocationRepairArchive,
     BookingItem,
     CashFlowEntry,
+    CementConversion,
+    CementConversionLayer,
     Client,
     DeliveryPersonPayment,
     DeliveryRent,
@@ -574,6 +576,18 @@ class _Projection:
         self.stock_adj_by_entry_id = {
             adj.entry_id: adj for adj in self.stock_adjustments if adj.entry_id
         }
+        # Cement bag -> open cement conversions.  Their cost layers are dated
+        # synthetic lots for the destination material, so the open cement is
+        # costed from the very purchase layers it was converted from (never
+        # from a selling price or a second valuation method).
+        self.cement_conversions = {
+            conv.id: conv for conv in CementConversion.query.all()
+        } if 'cement_conversion' in db.metadata.tables else {}
+        self.cement_conversion_layers = (
+            CementConversionLayer.query.all()
+            if 'cement_conversion_layer' in db.metadata.tables
+            else []
+        )
         returns_query = MaterialReturn.query.options(selectinload(MaterialReturn.items))
         if self.material_scope is not None:
             returns_query = returns_query.filter(
@@ -812,8 +826,10 @@ class _Projection:
             if remaining <= EPS:
                 continue
             rows.append({
-                "grn_item_id": lot["grn_item_id"],
+                "grn_item_id": lot.get("grn_item_id"),
                 "grn_id": lot.get("grn_id"),
+                "cement_conversion_id": lot.get("cement_conversion_id"),
+                "cement_conversion_layer_id": lot.get("cement_conversion_layer_id"),
                 "reference": lot.get("reference", ""),
                 "supplier": lot.get("supplier", ""),
                 "date": lot.get("date"),
@@ -824,6 +840,7 @@ class _Projection:
             row["date"] or datetime.min,
             row["grn_id"] or 0,
             row["grn_item_id"] or 0,
+            row.get("cement_conversion_layer_id") or 0,
         ))
         return rows
 
@@ -955,8 +972,45 @@ class _Projection:
                 }
                 lots_by_material[_mat_key(item.mat_name)].append(lot)
                 lot_by_item[item.id] = lot
+
+        # Cement conversion cost layers: one dated synthetic lot per consumed
+        # purchase layer, at that layer's own per-KG rate.  They participate in
+        # the same FIFO queue as GRN lots, so a later sale or loss of the open
+        # cement is costed from the exact purchase layers it came from.
+        for layer in self.cement_conversion_layers:
+            if bool(getattr(layer, "is_void", False)):
+                continue
+            conv = self.cement_conversions.get(layer.conversion_id)
+            if conv is None:
+                continue
+            dest_name = conv.dest_material or ""
+            if self.material_scope is not None and _mat_key(dest_name) not in self.material_scope:
+                continue
+            kg_qty = max(0.0, _f(getattr(layer, "kg_qty", 0)))
+            rate = max(0.0, _f(getattr(layer, "kg_unit_cost", 0)))
+            if kg_qty <= EPS or rate <= EPS:
+                continue
+            layer_date = _as_dt(getattr(conv, "conversion_date", None))
+            lots_by_material[_mat_key(dest_name)].append({
+                "grn_item_id": None,
+                "grn_id": None,
+                "cement_conversion_id": conv.id,
+                "cement_conversion_layer_id": layer.id,
+                "date": layer_date,
+                "material": dest_name,
+                "remaining": kg_qty,
+                "original_qty": kg_qty,
+                "rate": rate,
+                "reference": conv.reference or "",
+                "supplier": "",
+            })
         for lots in lots_by_material.values():
-            lots.sort(key=lambda lot: (lot["date"] or datetime.min, lot["grn_id"], lot["grn_item_id"]))
+            lots.sort(key=lambda lot: (
+                lot["date"] or datetime.min,
+                lot["grn_id"] or 0,
+                lot["grn_item_id"] or 0,
+                lot.get("cement_conversion_layer_id") or 0,
+            ))
 
         def lot_available(lot_date, tx_dt):
             return _lot_available(lot_date, tx_dt)
@@ -1121,9 +1175,17 @@ class _Projection:
                         missing = True
                         bases.append("Dated GRN lot without a purchase rate")
                         continue
+                    if layer.get("grn_item_id"):
+                        layer_type = "GRNItem"
+                    elif layer.get("cement_conversion_layer_id"):
+                        layer_type = "CementConversionLot"
+                    elif layer.get("stock_adjustment_id"):
+                        layer_type = "StockSurplusLot"
+                    else:
+                        layer_type = "ReturnLot"
                     sources.append({
-                        "type": ("GRNItem" if layer.get("grn_item_id") else ("StockSurplusLot" if layer.get("stock_adjustment_id") else "ReturnLot")),
-                        "id": layer.get("grn_item_id") or layer.get("stock_adjustment_id"), "grn_item_id": layer.get("grn_item_id"),
+                        "type": layer_type,
+                        "id": layer.get("grn_item_id") or layer.get("cement_conversion_layer_id") or layer.get("stock_adjustment_id"), "grn_item_id": layer.get("grn_item_id"),
                         "lot_rate": _f(layer["rate"]), "grn_id": layer.get("grn_id"),
                         "reference": layer.get("reference", ""), "supplier": layer.get("supplier", ""),
                         "date": layer.get("date"), "qty": _f(layer["qty"]), "rate": _f(layer["rate"]),
@@ -1537,22 +1599,33 @@ class _Projection:
             plan_event(kind, object_id, item, qty, tx_dt, allow_frozen=allow_frozen)
             remember_candidate(kind, object_id, item, qty, tx_dt)
 
-        self.grn_lot_balances = {
-            lot["grn_item_id"]: {
-                "grn_item_id": lot["grn_item_id"],
-                "grn_id": lot["grn_id"],
-                "material": lot.get("material", ""),
-                "date": lot.get("date"),
-                "received": lot.get("original_qty", lot["remaining"]),
-                "remaining": lot["remaining"],
-                "rate": lot["rate"],
-                "reference": lot["reference"],
-                "supplier": lot.get("supplier", ""),
-            }
-            for lots in lots_by_material.values()
-            for lot in lots
-            if lot.get("grn_item_id")
-        }
+        balances = {}
+        for lots in lots_by_material.values():
+            for lot in lots:
+                if lot.get("grn_item_id"):
+                    key = lot["grn_item_id"]
+                elif lot.get("cement_conversion_layer_id"):
+                    # Dated synthetic lot created by a cement conversion; it is
+                    # part of the destination material's FIFO queue and must be
+                    # visible to sale posting / stock valuation exactly like a
+                    # GRN lot, but it has no GRN item id.
+                    key = ("cement_conversion_layer", lot["cement_conversion_layer_id"])
+                else:
+                    continue
+                balances[key] = {
+                    "grn_item_id": lot.get("grn_item_id"),
+                    "grn_id": lot.get("grn_id"),
+                    "cement_conversion_id": lot.get("cement_conversion_id"),
+                    "cement_conversion_layer_id": lot.get("cement_conversion_layer_id"),
+                    "material": lot.get("material", ""),
+                    "date": lot.get("date"),
+                    "received": lot.get("original_qty", lot["remaining"]),
+                    "remaining": lot["remaining"],
+                    "rate": lot["rate"],
+                    "reference": lot.get("reference", ""),
+                    "supplier": lot.get("supplier", ""),
+                }
+        self.grn_lot_balances = balances
 
     def material_cost(self, item, tx_date, plan_key=None):
         """Resolve a sale/supply line's cost and its evidence."""

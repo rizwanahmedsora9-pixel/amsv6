@@ -281,6 +281,19 @@ def grn():
                     db.session.rollback()
                     flash(f'"{name}" is a service/charge and cannot be received on a GRN.', 'danger')
                     return redirect(url_for('grn'))
+                # Open Cement is produced internally from already-purchased
+                # bags; it must never be received through a GRN.  Enforced here
+                # (not just hidden in the dropdown) so a manipulated request
+                # cannot create an open-cement purchase.
+                from app.services.open_cement import is_open_cement_material_name
+                if is_open_cement_material_name(name):
+                    db.session.rollback()
+                    flash(
+                        f'"{name}" is an Open Cement item and cannot be received on a GRN. '
+                        'Open Cement is created by converting purchased cement bags.',
+                        'danger',
+                    )
+                    return redirect(url_for('grn'))
                 price_val = float(price) if price else 0
                 item = GRNItem(grn_id=new_grn.id, mat_name=name, qty=qty_val, price_at_time=price_val)
                 db.session.add(item)
@@ -423,9 +436,10 @@ def grn():
         grn_pagination = ordered_q.paginate(page=page, per_page=per_page, error_out=False)
     grns = grn_pagination.items
 
+    from app.services.open_cement import is_open_cement_material
     materials = [
         m for m in Material.query.filter_by(is_active=True).order_by(Material.name.asc()).all()
-        if not is_service_name(m.name)
+        if not is_service_name(m.name) and not is_open_cement_material(m)
     ]
     clients = Client.query.filter_by(is_active=True).order_by(Client.name.asc()).all()
     suppliers_list = Supplier.query.filter_by(is_active=True).order_by(Supplier.name.asc()).all()

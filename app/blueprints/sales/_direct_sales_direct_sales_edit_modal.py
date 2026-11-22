@@ -82,10 +82,19 @@ def direct_sale_edit_modal(sale_id):
         for hsv in Service.query.filter(func.lower(func.trim(Service.name)).in_(hist_names)).all():
             if hsv.id not in active_sids:
                 services.append(hsv)
+    # Open Cement rows in an edited bill get the same keg helper as the new
+    # sale sheet; the helper only fills the KG quantity.
+    try:
+        from app.services.open_cement import open_cement_materials
+        open_cement_material_names = [m.name for m in open_cement_materials()]
+    except Exception:
+        open_cement_material_names = []
+
     return render_template(
         '_direct_sale_edit_modal.html',
         sale=sale,
         materials=materials,
+        open_cement_material_names=open_cement_material_names,
         alt_materials=[m for m in materials if not is_service_name(m.name)],
         services=services,
         clients=clients,

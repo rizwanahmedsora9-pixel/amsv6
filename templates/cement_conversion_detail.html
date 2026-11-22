@@ -1,0 +1,99 @@
+{% extends "layout.html" %}
+{% from "_ui/page_header.html" import render as ui_header %}
+{% block content %}
+<div class="ui-v2">
+  {% set _toolbar %}
+    <a href="{{ url_for('inventory.cement_conversion') }}" class="btn btn-outline-secondary btn-pill fw-bold">
+      <i class="bi bi-arrow-left me-1"></i> Back to Conversions
+    </a>
+    <button type="button" class="btn btn-outline-secondary btn-pill fw-bold" onclick="window.print()">
+      <i class="bi bi-printer"></i>
+    </button>
+  {% endset %}
+  {{ ui_header('bi-arrow-left-right', 'Conversion ' ~ conv.reference,
+               subtitle=conv.source_material ~ ' → ' ~ conv.dest_material ~ ' · ' ~ conv.conversion_date ~ ' · ' ~ conv.status,
+               toolbar=_toolbar) }}
+
+  {% if conv.status == 'REVERSED' %}
+    <div class="alert alert-warning"><i class="bi bi-arrow-counterclockwise me-1"></i> This conversion has been <strong>reversed</strong>. The bag stock was restored and the open cement removed. Audit rows are preserved.</div>
+  {% endif %}
+
+  <div class="ui-card mb-3">
+    <div class="ui-card-header"><h5><i class="bi bi-receipt"></i> Conversion Summary</h5></div>
+    <div class="ui-card-body">
+      <div class="ui-form">
+        <div class="ui-row">
+          <div class="ui-field ui-col-2"><label class="ui-label">Conversion ID</label><div class="form-control-plaintext fw-bold">{{ conv.reference }}</div></div>
+          <div class="ui-field ui-col-2"><label class="ui-label">Date</label><div class="form-control-plaintext">{{ conv.conversion_date }}</div></div>
+          <div class="ui-field ui-col-2"><label class="ui-label">Source</label><div class="form-control-plaintext">{{ conv.source_material }}</div></div>
+          <div class="ui-field ui-col-2"><label class="ui-label">Destination</label><div class="form-control-plaintext">{{ conv.dest_material }}</div></div>
+          <div class="ui-field ui-col-2"><label class="ui-label">User</label><div class="form-control-plaintext">{{ conv.created_by }}</div></div>
+          <div class="ui-field ui-col-2"><label class="ui-label">Status</label><div class="form-control-plaintext"><span class="badge {{ 'bg-secondary' if conv.status == 'REVERSED' else 'bg-success' }}">{{ conv.status }}</span></div></div>
+        </div>
+        <div class="ui-row mt-2">
+          <div class="ui-field ui-col-2"><label class="ui-label">Bags Converted</label><div class="form-control-plaintext">{{ '%.3f'|format(conv.bags_converted) }} {{ conv.source_unit }}</div></div>
+          <div class="ui-field ui-col-2"><label class="ui-label">Weight per Bag</label><div class="form-control-plaintext">{{ '%.3f'|format(conv.weight_per_bag_kg) }} kg</div></div>
+          <div class="ui-field ui-col-2"><label class="ui-label">Open Cement Produced</label><div class="form-control-plaintext">{{ '%.3f'|format(conv.kg_produced) }} {{ conv.dest_unit }}</div></div>
+          <div class="ui-field ui-col-2"><label class="ui-label">Cost per Bag</label><div class="form-control-plaintext">Rs. {{ '%.2f'|format(conv.source_cost_per_bag) }}</div></div>
+          <div class="ui-field ui-col-2"><label class="ui-label">Total Transferred Cost</label><div class="form-control-plaintext">Rs. {{ '%.2f'|format(conv.total_transferred_cost) }}</div></div>
+          <div class="ui-field ui-col-2"><label class="ui-label">Remaining Source Stock</label><div class="form-control-plaintext">{{ '%.3f'|format(conv.source_stock_after) }} {{ conv.source_unit }}</div></div>
+        </div>
+        <div class="ui-row mt-2">
+          <div class="ui-field ui-col-12"><label class="ui-label">Remarks</label><div class="form-control-plaintext">{{ conv.note or '—' }}</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if conv.status != 'REVERSED' %}
+  <div class="ui-card border-warning mb-3">
+    <div class="ui-card-header"><h5><i class="bi bi-arrow-counterclockwise text-warning"></i> Reverse This Conversion</h5></div>
+    <div class="ui-card-body">
+      <p class="text-muted small mb-2">Reversal is allowed only when no open cement produced by this conversion has been sold or lost since. It restores the bagged stock and removes the open cement, and writes an audit row. The conversion itself is never deleted.</p>
+      <form method="POST" action="{{ url_for('inventory.cement_conversion_reverse', conversion_id=conv.id) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <div class="ui-form">
+          <div class="ui-row">
+            <div class="ui-field ui-col-6">
+              <label class="ui-label">Reason *</label>
+              <input type="text" name="reason" class="form-control" maxlength="255" required placeholder="Reason for reversal">
+            </div>
+            <div class="ui-actions ui-col-6 d-flex align-items-end">
+              <button type="submit" class="btn btn-warning fw-bold" onclick="return confirm('Reverse this conversion? Bags will be restored and open cement removed.');">
+                <i class="bi bi-arrow-counterclockwise me-1"></i> Reverse Conversion
+              </button>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="ui-card">
+    <div class="ui-card-header"><h5><i class="bi bi-clock-history"></i> Audit Trail (permanent)</h5></div>
+    <div class="ui-card-body">
+      <div class="table-responsive">
+        <table class="ui-table">
+          <thead><tr><th>When</th><th>User</th><th>Action</th><th>Details</th></tr></thead>
+          <tbody>
+            {% for a in audit %}
+            <tr>
+              <td>{{ a.created_at }}</td>
+              <td>{{ a.username }}</td>
+              <td>{{ a.action }}</td>
+              <td>
+                {% if a.reason %}{{ a.reason }}{% endif %}
+                {% if a.after_json %}<div class="small text-muted"><pre class="mb-0">{{ a.after_json }}</pre></div>{% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="ui-empty">No audit rows.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

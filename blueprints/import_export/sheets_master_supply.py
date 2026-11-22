@@ -45,6 +45,12 @@ def _process_grn_items(df, strategy, report):
             if mat_name:
                 report['skipped'] += 1
             continue
+        # Open Cement is internally produced and must never be imported as a
+        # GRN receipt.
+        from app.services.open_cement import is_open_cement_material_name
+        if is_open_cement_material_name(mat_name):
+            report['skipped'] += 1
+            continue
             
         grn = None
         if manual_bill:

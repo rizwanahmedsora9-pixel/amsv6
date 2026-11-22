@@ -14,6 +14,21 @@ class Material(db.Model):
     unit = db.Column(db.String(20), default='Bags')
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=pk_model_now, index=True)
+    # --- Open Cement support -------------------------------------------- #
+    # An Open Cement item is a normal Material row that belongs to the
+    # reserved "Open Cement" category.  ``source_material_id`` is the explicit,
+    # reliable link back to the bagged cement item it was converted from (never
+    # a name match).  ``bag_weight_kg`` lets a bagged cement item remember how
+    # many kilograms one bag holds; the conversion form defaults to it and
+    # falls back to the system default (50 kg).
+    source_material_id = db.Column(
+        db.Integer, db.ForeignKey('material.id'), nullable=True, index=True
+    )
+    bag_weight_kg = db.Column(db.Float, nullable=True)
+    # The bagged item this open-cement item was converted from (self-link).
+    source_material = db.relationship(
+        'Material', remote_side=[id], foreign_keys=[source_material_id], uselist=False
+    )
 
     category = db.relationship('MaterialCategory', backref=db.backref('materials', lazy=True))
 
@@ -69,4 +84,3 @@ class MaterialCategory(db.Model):
     name = db.Column(db.String(100), nullable=False)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=pk_model_now, index=True)
-
