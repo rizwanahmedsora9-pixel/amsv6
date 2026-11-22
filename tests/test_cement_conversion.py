@@ -509,6 +509,56 @@ def test_g_multiple_grn_rates_keep_layer_traceability(world):
 # --------------------------------------------------------------------------- #
 # H. Different brands are independent
 # --------------------------------------------------------------------------- #
+def test_material_brands_page_repairs_and_shows_open_cement_category(world):
+    from app.services.open_cement import open_cement_category
+
+    with world.app_context():
+        category = open_cement_category()
+        category.is_active = False
+        db.session.commit()
+
+    web = world.test_client()
+    _login(web)
+    response = web.get('/materials')
+    assert response.status_code == 200
+    assert b'Open Cement' in response.data
+    with world.app_context():
+        category = open_cement_category()
+        assert category is not None and category.is_active
+
+
+def test_full_wipe_classifies_cement_conversion_tables(world):
+    """Full wipe must clear conversion headers/layers, not misclassify them as extensions."""
+    from app.services.full_wipe import wipe_all_business_data
+
+    with world.app_context():
+        category = MaterialCategory(name='Cement')
+        db.session.add(category)
+        db.session.flush()
+        source = Material(name='Bagged Cement', code='WIPE-BAG', category_id=category.id)
+        dest = Material(name='Open Cement', code='WIPE-OPEN', category_id=category.id)
+        db.session.add_all([source, dest])
+        db.session.flush()
+        conversion = CementConversion(
+            reference='WIPE-CNV-1', conversion_date='2026-11-22',
+            source_material_id=source.id, source_material=source.name,
+            dest_material_id=dest.id, dest_material=dest.name,
+            bags_converted=1, weight_per_bag_kg=50, kg_produced=50,
+        )
+        db.session.add(conversion)
+        db.session.flush()
+        db.session.add(CementConversionLayer(conversion_id=conversion.id))
+        db.session.commit()
+
+        unknown = wipe_all_business_data(db.session)
+        db.session.commit()
+
+        assert 'cement_conversion' not in unknown
+        assert 'cement_conversion_layer' not in unknown
+        assert CementConversion.query.count() == 0
+        assert CementConversionLayer.query.count() == 0
+
+
 def test_h_brands_are_independent(world):
     data = _make_world(world, bags=10, rate=1400.0, bag_name='DG Cement', open_name='Open DG Cement')
     with world.app_context():

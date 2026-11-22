@@ -313,7 +313,7 @@ function copyConversionTable() {
         var alerts = [];
         if (!data.sufficient_stock) alerts.push({ type: 'error', message: 'Not enough bagged stock on the conversion date. Available: ' + fmt(data.available_stock, 3) + ' ' + data.source_unit + '.' });
         else if (!data.covered) alerts.push({ type: 'error', message: 'No costing layer (GRN lot) covers these bags on that date; the original purchase cost cannot be inherited.' });
-        if (data.linked_open.length === 0) alerts.push({ type: 'error', message: 'This source has no linked Open Cement item. Link one on Inventory → Add Material first.' });
+        if (data.linked_open.length === 0) alerts.push({ type: 'error', message: 'No Open Cement item is linked to this source yet. In Material Brands, edit the Open Cement item and set its “Linked Bagged Cement Item” to this source.' });
         if (data.linked_open.length > 1) alerts.push({ type: 'warn', message: 'More than one Open Cement item is linked to this source; pick the intended one.' });
         setAlerts(alerts);
       });
