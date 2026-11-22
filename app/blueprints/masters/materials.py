@@ -16,6 +16,17 @@ def materials():
         q = q.filter(Material.unit == unit_filter)
 
     pagination = q.order_by(Material.code.asc()).paginate(page=page, per_page=10)
+    # Keep the reserved Open Cement category visible even on older databases
+    # where bootstrap may have run before the feature/category was introduced.
+    # The helper is idempotent and also reactivates the reserved category.
+    from app.services.open_cement import ensure_open_cement_category
+    try:
+        ensure_open_cement_category()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        logging.getLogger(__name__).exception('Could not ensure Open Cement material category')
+
     # Fetch all materials for the merge modal dropdown
     all_materials = Material.query.order_by(Material.name.asc()).all()
     categories = MaterialCategory.query.order_by(MaterialCategory.name.asc()).all()

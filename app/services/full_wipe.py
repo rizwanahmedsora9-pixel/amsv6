@@ -56,6 +56,11 @@ BUSINESS_TABLES = frozenset({
     'cash_day_shift_close', 'cash_day_shift_close_position', 'cash_flow_category',
     'cash_flow_difference_adjustment', 'cash_flow_entry', 'cash_flow_entry_audit',
     'cash_flow_party', 'cash_flow_reconciliation_audit', 'cash_flow_subcategory',
+    # Open Cement conversion records are business transactions linked to
+    # materials, entries, GRNs, and FIFO layers. Treat both tables as wipeable
+    # business data; otherwise their FK to material makes them look like an
+    # unknown table and correctly triggers the protective abort.
+    'cement_conversion', 'cement_conversion_layer',
     'client', 'client_category', 'delivery', 'delivery_item', 'delivery_person',
     'delivery_person_payment', 'delivery_rent', 'direct_sale', 'direct_sale_draft',
     'direct_sale_item', 'entry', 'fbm_cash_drawer_category', 'fbm_cash_drawer_entry',
