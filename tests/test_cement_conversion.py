@@ -794,6 +794,109 @@ def test_j_permission_denied_for_unauthorized_role(world):
     assert page.status_code in (302, 403)
 
 
+# --------------------------------------------------------------------------- #
+# K. Destination dropdown must load independently of the cost preview
+# --------------------------------------------------------------------------- #
+def test_k_linked_open_list_loads_without_a_quantity(world):
+    """The dropdown fills before the operator types a quantity."""
+    data = _make_world(world, bags=100, rate=1400.0)
+    web = world.test_client()
+    _login(web)
+    resp = web.get(f"/inventory/cement_conversion/linked_open?source={data['bag_id']}")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body['ok'] is True
+    assert [m['id'] for m in body['linked_open']] == [data['open_id']]
+
+
+def test_k_linked_open_endpoint_rejects_unknown_and_open_cement_sources(world):
+    data = _make_world(world)
+    web = world.test_client()
+    _login(web)
+    missing = web.get('/inventory/cement_conversion/linked_open?source=999999')
+    assert missing.status_code == 404
+    assert missing.get_json()['linked_open'] == []
+    open_src = web.get(f"/inventory/cement_conversion/linked_open?source={data['open_id']}")
+    assert open_src.status_code == 400
+    assert open_src.get_json()['linked_open'] == []
+
+
+def test_k_preview_always_carries_the_linked_list(world):
+    """A refused preview (empty quantity) must not blank the destination list,
+    and a valid preview must return the linked items (no server error)."""
+    data = _make_world(world, bags=100, rate=1400.0)
+    web = world.test_client()
+    _login(web)
+    refused = web.get(f"/inventory/cement_conversion/preview?source={data['bag_id']}&bags=0")
+    assert refused.status_code == 400
+    assert refused.get_json()['ok'] is False
+    assert [m['id'] for m in refused.get_json()['linked_open']] == [data['open_id']]
+
+    valid = web.get(
+        f"/inventory/cement_conversion/preview?source={data['bag_id']}&bags=2&weight_per_bag=50"
+    )
+    assert valid.status_code == 200
+    assert valid.get_json()['ok'] is True
+    assert [m['id'] for m in valid.get_json()['linked_open']] == [data['open_id']]
+
+
+def test_k_conversion_screen_uses_the_linked_open_endpoint(world):
+    data = _make_world(world)
+    web = world.test_client()
+    _login(web)
+    html = web.get('/inventory/cement_conversion').get_data(as_text=True)
+    assert '/inventory/cement_conversion/linked_open' in html
+    assert 'cement_conversion_linked_open' not in html  # url_for() must have resolved
+
+
+def test_k_materials_form_link_is_visible_on_the_conversion_screen(world):
+    """End-to-end: Add Brand -> link -> conversion screen destination list."""
+    data = _make_world(world)
+    with world.app_context():
+        cement_cat = MaterialCategory(name='Cement', is_active=True)
+        db.session.add(cement_cat)
+        db.session.commit()
+        cement_cat_id, open_cat_id = cement_cat.id, data['cat_id']
+
+    web = world.test_client()
+    _login(web)
+
+    # 1. Bagged source item, exactly like the Add Brand modal posts it.
+    response = web.post('/add_material', data={
+        'material_name': 'Kohat',
+        'material_code': 'FBM-CEM-000101',
+        'category_id': str(cement_cat_id),
+        'material_unit': 'Bags',
+        '_csrf_token': _csrf(web),
+    })
+    assert response.status_code == 302
+    with world.app_context():
+        kohat = Material.query.filter_by(name='Kohat').one()
+        kohat_id = kohat.id
+        assert kohat.source_material_id is None
+
+    # 2. The Open Cement item linked to it.
+    response = web.post('/add_material', data={
+        'material_name': 'Kohat Open Cement',
+        'material_code': 'FBM-OPEN-000101',
+        'category_id': str(open_cat_id),
+        'material_unit': 'Bags',  # the server forces KG for Open Cement
+        'source_material_id': str(kohat_id),
+        '_csrf_token': _csrf(web),
+    })
+    assert response.status_code == 302
+    with world.app_context():
+        kohat_open = Material.query.filter_by(name='Kohat Open Cement').one()
+        open_id = kohat_open.id
+        assert kohat_open.unit == 'KG'
+        assert kohat_open.source_material_id == kohat_id
+
+    # 3. The conversion screen must offer it for that source.
+    response = web.get(f'/inventory/cement_conversion/linked_open?source={kohat_id}')
+    assert response.status_code == 200
+    assert [m['id'] for m in response.get_json()['linked_open']] == [open_id]
+
+
 def test_j_csrf_token_required(tmp_path, monkeypatch):
     """With CSRF enforcement forced on, a token-less POST is refused."""
     monkeypatch.setenv('APP_DB_PATH', str(tmp_path / 'cement_csrf.db'))
