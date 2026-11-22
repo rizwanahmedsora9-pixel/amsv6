@@ -7,7 +7,7 @@ from datetime import datetime, date as _date
 
 from sqlalchemy import case, func
 
-from models import AuditLog, Entry, Material, StockAdjustment, db
+from models import AuditLog, CementConversion, Entry, Material, StockAdjustment, db
 from app.services import constants as C
 from app.services.billing import get_next_bill_no
 from app.services.lookups import get_material_by_input, is_service_name
@@ -71,6 +71,15 @@ def _compose_datetime(date_str, time_str):
         return datetime.strptime(f"{date_str} {time_str}", '%Y-%m-%d %H:%M:%S')
     except Exception:
         return pk_now()
+
+
+def _is_open_cement(mat) -> bool:
+    """True when *mat* belongs to the reserved Open Cement category."""
+    try:
+        from app.services.open_cement import is_open_cement_material
+        return is_open_cement_material(mat)
+    except Exception:
+        return False
 
 
 def _resolve_material(material_input):
@@ -177,6 +186,50 @@ def estimate_adjustment_cost(
     if master_price > 0:
         return round(master_price, 4), round(qty_f * master_price, 2), 'Material master unit price'
     return 0.0, 0.0, 'Cost unresolved (no GRN or unit price)'
+
+
+def estimate_adjustment_conversion_reference(
+    material_name,
+    as_of_date=None,
+    qty=1.0,
+    direction='LOSS',
+    *,
+    projection=None,
+):
+    """Return the cement conversion reference this adjustment is costed from.
+
+    For Open Cement the FIFO lots are dated synthetic lots created by a bag ->
+    KG conversion, so the loss cost is inherited from that conversion.  This
+    returns its ``SB-CC-####`` reference (or ``None`` for a GRN-derived or
+    manual-cost adjustment) so the Lost Ledger row keeps a permanent link back
+    to the transfer that produced the stock.
+    """
+    qty_f = max(0.0, float(qty or 0.0))
+    date_str = _parse_date_str(as_of_date, default_today=True)
+    try:
+        as_of_dt = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        as_of_dt = pk_now().date()
+    if projection is None:
+        projection = _get_projection()
+    if (direction or 'LOSS').strip().upper() != 'LOSS':
+        return None
+    remaining = qty_f
+    for lot in projection.available_fifo_lots(material_name, as_of_dt):
+        if remaining <= EPS:
+            break
+        avail = max(0.0, float(lot.get('available') or 0.0))
+        if avail <= EPS:
+            continue
+        layer_id = int(lot.get('cement_conversion_layer_id') or 0)
+        if layer_id:
+            from models import CementConversionLayer
+            layer = db.session.get(CementConversionLayer, layer_id)
+            conv = db.session.get(CementConversion, layer.conversion_id) if layer else None
+            if conv is not None:
+                return conv.reference
+        remaining -= min(remaining, avail)
+    return None
 
 
 def build_material_cost_map(as_of_date=None, *, projection=None):
@@ -286,6 +339,7 @@ def create_stock_adjustment(
     actor='System',
     actor_user=None,
     projection=None,
+    conversion_reference=None,
 ):
     """Create a StockAdjustment + linked Entry + rebuild Material.total.
 
@@ -324,6 +378,16 @@ def create_stock_adjustment(
         diff = -resolved_qty if resolved_dir == 'LOSS' else resolved_qty
         phys_f = round(sys_qty + diff, 6)
 
+    # Open Cement stock exists only because a conversion put it there, and its
+    # cost is inherited from the original GRN.  Losing more than is on hand
+    # would create negative stock and a bogus loss cost, so it is refused here
+    # (server-side, not just in the form).
+    if resolved_dir == 'LOSS' and _is_open_cement(mat) and resolved_qty > sys_qty + EPS:
+        raise ValueError(
+            f'Loss quantity {resolved_qty:g} exceeds available Open Cement stock '
+            f'{sys_qty:g} {mat.unit or "KG"} for {mat.name}.'
+        )
+
     clean_reason = (reason or '').strip()
     if not clean_reason:
         clean_reason = 'Damage / Broken' if resolved_dir == 'LOSS' else 'Found Extra / Surplus'
@@ -346,6 +410,23 @@ def create_stock_adjustment(
             mat.name, date_str, resolved_qty, resolved_dir, projection=projection
         )
 
+    # Open Cement: record which conversion the loss cost was inherited from.
+    # An explicit caller-supplied reference wins (the form preview supplies it);
+    # otherwise it is derived from the same FIFO lot the cost came from.
+    resolved_conversion_reference = (conversion_reference or '').strip()[:50] or None
+    if (
+        resolved_conversion_reference is None
+        and resolved_dir == 'LOSS'
+        and manual_rate is None
+        and _is_open_cement(mat)
+    ):
+        try:
+            resolved_conversion_reference = estimate_adjustment_conversion_reference(
+                mat.name, date_str, resolved_qty, resolved_dir, projection=projection
+            )
+        except Exception:
+            resolved_conversion_reference = None
+
     ns = C.AUTO_BILL_NAMESPACES['STOCK_ADJUSTMENT']
     reference = get_next_bill_no(ns)
 
@@ -366,6 +447,7 @@ def create_stock_adjustment(
         total_value=total_val,
         cost_source=cost_src[:200],
         source=(source or 'lost_ledger')[:40],
+        conversion_reference=resolved_conversion_reference,
         created_by=actor,
         updated_by=actor,
         is_void=False,
@@ -395,6 +477,7 @@ def create_stock_adjustment(
             'unit_cost': adj.unit_cost,
             'total_value': adj.total_value,
             'source': adj.source,
+            'conversion_reference': adj.conversion_reference,
             'actor': actor,
         }, default=str)[:1000],
     ))

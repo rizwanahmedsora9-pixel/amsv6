@@ -148,7 +148,10 @@ def test_groups_reconcile_with_material_rows_and_overall_totals(desk):
         overall = ctx['overall_totals']
 
         # Every master category + Uncategorised, alphabetical with uncat last.
-        assert [g['name'] for g in groups] == ['Cement', 'Sand', 'Steel', 'Uncategorised']
+        # "Open Cement" is the reserved system category created at bootstrap.
+        assert [g['name'] for g in groups] == [
+            'Cement', 'Open Cement', 'Sand', 'Steel', 'Uncategorised'
+        ]
         # The activity-free category renders with zero totals and no rows.
         sand_group = next(g for g in groups if g['name'] == 'Sand')
         assert sand_group['materials'] == []
@@ -219,14 +222,15 @@ def test_dropdown_markup_search_and_cards_contract(desk):
 
     # Dropdown carries every category from the DB plus All Categories.
     assert '<option value="">All Categories</option>' in html
-    for g_name in ('Cement', 'Sand', 'Steel', 'Uncategorised'):
+    for g_name in ('Cement', 'Open Cement', 'Sand', 'Steel', 'Uncategorised'):
         assert re.search(rf'<option value="[^"]+">{g_name}</option>', html)
     # Client-side only: the category select must not submit/reload the page.
     sel_tag = re.search(r'<select id="dl-cat-filter"[^>]*>', html).group(0)
     assert 'name=' not in sel_tag
 
     # Expandable rows, indented children, search box and card hooks exist.
-    assert html.count('class="dl-cat-row"') == 4
+    # Five groups: Cement, the reserved Open Cement, Sand, Steel, Uncategorised.
+    assert html.count('class="dl-cat-row"') == 5
     assert 'data-name="dg"' in html and 'data-name="mystery mat"' in html
     assert 'id="dl-mat-search"' in html
     # The empty Sand group shows a placeholder child, not a broken arrow.
@@ -242,7 +246,11 @@ def test_empty_database_renders_cleanly(desk):
     resp = web.get('/decision_ledger')
     assert resp.status_code == 200
     html = resp.get_data(as_text=True)
-    assert 'No material activity found.' in html
+    # The reserved Open Cement category exists from bootstrap, so the page
+    # renders its (empty) group with the standard placeholder instead of the
+    # whole-page "no activity" message.
+    assert 'Open Cement' in html
+    assert 'No material activity in this category.' in html
     assert 'All Categories' in html
 
 

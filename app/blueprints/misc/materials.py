@@ -52,6 +52,19 @@ def merge_materials():
         flash('One or both materials not found', 'danger')
         return redirect(url_for('materials'))
 
+    # An Open Cement item links to its bagged cement item by id.  Merging the
+    # linked bagged item away would leave that link dangling, so refuse the
+    # merge instead of silently breaking the conversion relationship.
+    linked = Material.query.filter(Material.source_material_id == source_mat.id).all()
+    if linked:
+        names = ', '.join(m.name for m in linked[:5])
+        flash(
+            f'"{source_mat.name}" is the linked bagged cement item for Open Cement '
+            f'item(s): {names}. Re-link those items to "{target_mat.name}" first.',
+            'danger',
+        )
+        return redirect(url_for('materials'))
+
     try:
         source_name = source_mat.name
         target_name = target_mat.name
@@ -98,6 +111,30 @@ def add_material():
             category = None
     if not category:
         category = get_or_create_material_category('General')
+    # Open Cement items are stocked in kilograms and must point at the bagged
+    # cement item they are converted from.  The category drives the rule; no
+    # brand name is hard-coded.
+    from app.services.open_cement import (
+        ensure_open_cement_category,
+        is_open_cement_category,
+        is_open_cement_material,
+    )
+    ensure_open_cement_category()
+    open_cement = is_open_cement_category(category)
+    if open_cement:
+        unit = 'KG'
+    source_material_id = None
+    if open_cement:
+        raw_source = (request.form.get('source_material_id') or '').strip()
+        if raw_source:
+            try:
+                source_material_id = int(raw_source)
+            except (TypeError, ValueError):
+                source_material_id = None
+        source_mat = db.session.get(Material, source_material_id) if source_material_id else None
+        if source_mat is None or is_open_cement_material(source_mat):
+            flash('Select the bagged cement item this Open Cement item is converted from.', 'danger')
+            return redirect(url_for('materials'))
     if not code:
         code = _next_material_code_for_category(category, material_name=name)
     if Material.query.filter_by(code=code).first():
@@ -113,6 +150,7 @@ def add_material():
             code=code,
             category_id=category.id if category else None,
             unit=unit,
+            source_material_id=source_material_id,
         )
         db.session.add(new_mat)
         db.session.commit()
@@ -211,6 +249,7 @@ def edit_material(id):
             m.name_ur = (request.form.get('material_name_ur') or '').strip()
         m.code = new_code
         m.unit = new_unit
+        new_category = m.category
         if category_id:
             try:
                 cat = db.session.get(MaterialCategory, int(category_id))
@@ -218,6 +257,28 @@ def edit_material(id):
                 cat = None
             if cat:
                 m.category_id = cat.id
+                new_category = cat
+        # Open Cement rules follow the category, including on a category move.
+        from app.services.open_cement import (
+            ensure_open_cement_category,
+            is_open_cement_category,
+            is_open_cement_material,
+        )
+        ensure_open_cement_category()
+        if is_open_cement_category(new_category):
+            m.unit = 'KG'
+            raw_source = (request.form.get('source_material_id') or '').strip()
+            source_material_id = None
+            if raw_source:
+                try:
+                    source_material_id = int(raw_source)
+                except (TypeError, ValueError):
+                    source_material_id = None
+            source_mat = db.session.get(Material, source_material_id) if source_material_id else None
+            if source_mat is None or is_open_cement_material(source_mat):
+                flash('Select the bagged cement item this Open Cement item is converted from.', 'danger')
+                return redirect(url_for('materials'))
+            m.source_material_id = source_mat.id
         db.session.commit()
         flash('Brand Updated', 'info')
     return redirect(url_for('materials'))
@@ -282,6 +343,11 @@ def rename_material_category(id):
     if cat.name.lower() == 'general' and name.lower() != 'general':
         flash('Default category cannot be renamed', 'danger')
         return redirect(url_for('settings'))
+    from app.services.open_cement import protect_open_cement_category
+    protected = protect_open_cement_category(cat)
+    if protected:
+        flash(protected, 'danger')
+        return redirect(url_for('settings'))
     existing = MaterialCategory.query.filter(
         func.lower(func.trim(MaterialCategory.name)) == name.lower()
     ).first()
@@ -306,6 +372,11 @@ def toggle_material_category(id):
         return redirect(url_for('settings'))
     if cat.name.lower() == 'general' and cat.is_active:
         flash('Default category cannot be disabled', 'danger')
+        return redirect(url_for('settings'))
+    from app.services.open_cement import protect_open_cement_category
+    protected = protect_open_cement_category(cat)
+    if protected:
+        flash(protected, 'danger')
         return redirect(url_for('settings'))
     cat.is_active = not cat.is_active
     db.session.commit()

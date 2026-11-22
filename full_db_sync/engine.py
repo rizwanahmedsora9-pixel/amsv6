@@ -45,6 +45,10 @@ _LEGACY_DEFAULTS = {
     "material_return": {"source_sale_id": None, "source_bill_no": None,
                         "voided_with_sale": 0},
     "user_login_session": {"last_active_at": None, "activity_state": None},
+    # Cement Bag -> Open Cement conversion (migration 0018).  Both columns are
+    # additive and nullable, so an older snapshot imports with them empty.
+    "material": {"source_material_id": None, "bag_weight_kg": None},
+    "stock_adjustment": {"conversion_reference": None},
 }
 
 # Minimal "is this an AMS business database?" probe.  The AMS v4.4 schema

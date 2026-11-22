@@ -4,6 +4,7 @@ from .helpers import *  # noqa
 from .stock import *  # noqa
 from .daily import *  # noqa
 from .lost_ledger import *  # noqa
+from .cement_conversion import *  # noqa
 
 from utils.pkg_wire import wire_package
 wire_package('blueprints.inventory')

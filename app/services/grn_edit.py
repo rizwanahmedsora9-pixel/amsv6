@@ -154,6 +154,15 @@ def sync_items_from_form(grn, form, *, actor=None) -> dict:
 
         if is_service_name(name) or get_service_by_input(name):
             raise ValueError(f'"{name}" is a service/charge and cannot be received on a GRN.')
+        # Open Cement is internally produced from purchased bags and must never
+        # be received on a GRN (enforced even when a manipulated request tries
+        # to change an existing line to an open-cement item).
+        from app.services.open_cement import is_open_cement_material_name
+        if is_open_cement_material_name(name):
+            raise ValueError(
+                f'"{name}" is an Open Cement item and cannot be received on a GRN. '
+                'Open Cement is created by converting purchased cement bags.'
+            )
         known_row = raw_id.isdigit() and int(raw_id) in stored_by_id
         if qty <= 0:
             # Zero/negative received quantity never creates a stock movement.

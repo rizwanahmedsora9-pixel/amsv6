@@ -21,11 +21,14 @@ def materials():
     categories = MaterialCategory.query.order_by(MaterialCategory.name.asc()).all()
     units = [r[0] for r in db.session.query(Material.unit).distinct().filter(Material.unit != None, Material.unit != '').order_by(Material.unit).all()]
 
+    from app.services.open_cement import source_materials_for_conversion
+    source_materials = source_materials_for_conversion()
     return render_template('materials.html',
                            materials=pagination.items,
                            pagination=pagination,
                            all_materials=all_materials,
                            categories=categories,
+                           source_materials=source_materials,
                            category_filter=category_id,
                            unit_filter=unit_filter,
                            units=units)

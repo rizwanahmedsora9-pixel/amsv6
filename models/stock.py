@@ -217,6 +217,10 @@ class StockAdjustment(db.Model):
     total_value = db.Column(db.Float, default=0.0)
     cost_source = db.Column(db.String(200), default='')
     source = db.Column(db.String(40), default='lost_ledger')  # lost_ledger | stock_summary
+    # Open Cement losses carry the conversion reference they were costed from,
+    # so the Lost Ledger row keeps a permanent link back to the bag -> KG
+    # transfer that created the stock (never a hard-coded brand name).
+    conversion_reference = db.Column(db.String(50), nullable=True, index=True)
     entry_id = db.Column(db.Integer, db.ForeignKey('entry.id'), nullable=True, index=True)
     created_by = db.Column(db.String(80))
     updated_by = db.Column(db.String(80))
@@ -230,3 +234,89 @@ class StockAdjustment(db.Model):
     entry = db.relationship('Entry', foreign_keys=[entry_id])
 
 
+
+
+class CementConversion(db.Model):
+    """Cement bag -> open cement (KG) inventory conversion header.
+
+    This is an *internal stock transfer*, never a purchase, sale or expense:
+    it moves already-purchased bagged cement into a linked Open Cement item
+    while carrying the original FIFO purchase cost across.  Two ``Entry``
+    rows (source OUT, destination IN) reference ``id`` through
+    ``source_module='inventory' / source_table='cement_conversion'``, so the
+    stock ledger and the conversion history always agree.
+    """
+    __tablename__ = 'cement_conversion'
+
+    id = db.Column(db.Integer, primary_key=True)
+    reference = db.Column(db.String(50), unique=True, index=True, nullable=False)
+    conversion_date = db.Column(db.String(20), nullable=False, index=True)
+    conversion_time = db.Column(db.String(20), default='00:00:00')
+    date_posted = db.Column(db.DateTime, default=pk_model_now, index=True)
+
+    source_material_id = db.Column(db.Integer, db.ForeignKey('material.id'), nullable=True, index=True)
+    source_material = db.Column(db.String(100), nullable=False)
+    source_unit = db.Column(db.String(20), default='Bags')
+    bags_converted = db.Column(db.Float, nullable=False, default=0)
+    weight_per_bag_kg = db.Column(db.Float, nullable=False, default=50)
+    kg_produced = db.Column(db.Float, nullable=False, default=0)
+    # Stock on hand immediately after the conversion (historical snapshot for
+    # the history screen; later movements never rewrite it).
+    source_stock_after = db.Column(db.Float, nullable=True)
+    dest_stock_after = db.Column(db.Float, nullable=True)
+
+    dest_material_id = db.Column(db.Integer, db.ForeignKey('material.id'), nullable=True, index=True)
+    dest_material = db.Column(db.String(100), nullable=False)
+    dest_unit = db.Column(db.String(20), default='KG')
+
+    # Cost carried across from the source FIFO lots (never the selling price).
+    source_cost_per_bag = db.Column(db.Float, default=0)
+    source_cost_per_kg = db.Column(db.Float, default=0)
+    total_transferred_cost = db.Column(db.Float, default=0)
+    cost_basis = db.Column(db.String(400), default='')
+
+    source_entry_id = db.Column(db.Integer, db.ForeignKey('entry.id'), nullable=True, index=True)
+    dest_entry_id = db.Column(db.Integer, db.ForeignKey('entry.id'), nullable=True, index=True)
+    reversal_entry_id = db.Column(db.Integer, db.ForeignKey('entry.id'), nullable=True, index=True)
+
+    status = db.Column(db.String(20), default='POSTED', index=True)  # POSTED | REVERSED
+    note = db.Column(db.String(500), default='')
+    idempotency_key = db.Column(db.String(64), nullable=True, unique=True, index=True)
+    created_by = db.Column(db.String(80))
+    updated_by = db.Column(db.String(80))
+    created_at = db.Column(db.DateTime, default=pk_model_now, index=True)
+    updated_at = db.Column(db.DateTime, default=pk_model_now, onupdate=pk_model_now)
+    reversed_at = db.Column(db.DateTime, nullable=True)
+    reversed_by = db.Column(db.String(80))
+    reverse_reason = db.Column(db.String(300))
+
+    layers = db.relationship(
+        'CementConversionLayer', backref='conversion', lazy=True,
+        cascade='all, delete-orphan',
+    )
+
+
+class CementConversionLayer(db.Model):
+    """One source FIFO purchase layer consumed by a conversion.
+
+    Keeping a row per layer is what preserves per-KG purchase-cost
+    traceability: the destination open-cement stock is replayed from these
+    layers at their own rates, exactly like a GRN lot.
+    """
+    __tablename__ = 'cement_conversion_layer'
+
+    id = db.Column(db.Integer, primary_key=True)
+    conversion_id = db.Column(
+        db.Integer, db.ForeignKey('cement_conversion.id'), nullable=False, index=True
+    )
+    grn_item_id = db.Column(db.Integer, db.ForeignKey('grn_item.id'), nullable=True, index=True)
+    grn_id = db.Column(db.Integer, db.ForeignKey('grn.id'), nullable=True, index=True)
+    reference = db.Column(db.String(50), default='')
+    supplier = db.Column(db.String(100), default='')
+    lot_date = db.Column(db.String(20), default='')
+    source_qty_bags = db.Column(db.Float, default=0)
+    source_unit_cost = db.Column(db.Float, default=0)
+    kg_qty = db.Column(db.Float, default=0)
+    kg_unit_cost = db.Column(db.Float, default=0)
+    cost_amount = db.Column(db.Float, default=0)
+    is_void = db.Column(db.Boolean, default=False, index=True)

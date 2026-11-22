@@ -19,6 +19,7 @@ from app.services.stock_adjustments import (
     build_material_cost_map,
     create_stock_adjustment,
     estimate_adjustment_cost,
+    estimate_adjustment_conversion_reference,
     hard_delete_stock_adjustment,
     system_stock_as_of,
     update_stock_adjustment,
@@ -321,6 +322,20 @@ def lost_ledger_material_info():
     unit_cost, total_val, cost_src = estimate_adjustment_cost(
         mat.name, as_of_date, qty=max(qty, 1.0), direction=direction
     )
+    is_open = False
+    conv_ref = None
+    try:
+        from app.services.open_cement import is_open_cement_material
+        is_open = is_open_cement_material(mat)
+    except Exception:
+        is_open = False
+    if is_open and direction == 'LOSS':
+        try:
+            conv_ref = estimate_adjustment_conversion_reference(
+                mat.name, as_of_date, qty=max(qty, 1.0), direction=direction
+            )
+        except Exception:
+            conv_ref = None
     return jsonify({
         'ok': True,
         'material': mat.name,
@@ -329,6 +344,8 @@ def lost_ledger_material_info():
         'unit_cost': unit_cost,
         'total_value': total_val,
         'cost_source': cost_src,
+        'is_open_cement': is_open,
+        'conversion_reference': conv_ref,
     })
 
 
@@ -344,6 +361,7 @@ def lost_ledger_add():
     reason = (request.form.get('reason') or '').strip()
     note = (request.form.get('note') or '').strip()
     unit_cost_raw = (request.form.get('unit_cost') or '').strip()
+    conversion_reference = (request.form.get('conversion_reference') or '').strip()
 
     redirect_url = _lost_ledger_redirect_url()
 
@@ -371,6 +389,7 @@ def lost_ledger_add():
                 source='lost_ledger',
                 actor=actor,
                 actor_user=current_user,
+                conversion_reference=conversion_reference,
             )
             if adj is None:
                 flash('Entered physical count matches system stock (0 difference). No adjustment needed.', 'info')
@@ -387,6 +406,7 @@ def lost_ledger_add():
                 source='lost_ledger',
                 actor=actor,
                 actor_user=current_user,
+                conversion_reference=conversion_reference,
             )
         db.session.commit()
         if is_backdate_restricted(current_user):

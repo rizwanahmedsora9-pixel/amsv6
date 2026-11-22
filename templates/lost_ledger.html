@@ -33,6 +33,7 @@
         <form method="POST" action="{{ url_for('inventory.lost_ledger_add') }}" id="addAdjustmentForm" class="ui-form">
           <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="next" value="{{ request.full_path }}">
+          <input type="hidden" name="conversion_reference" id="addConversionReference" value="">
 
           <div class="ui-row">
             <div class="ui-field ui-col-3">
@@ -662,10 +663,17 @@ function syncAddPreview() {
   const valFmt = val.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
   const sign = delta < 0 ? '-' : '+';
   const badgeCls = delta < 0 ? 'text-danger' : (delta > 0 ? 'text-success' : 'text-muted');
+  const convRefInput = document.getElementById('addConversionReference');
+  const convRef = cached ? (cached.conversion_reference || '') : '';
+  if (convRefInput) convRefInput.value = convRef;
+  const openHint = (cached && cached.is_open_cement)
+    ? ' · Open Cement, cost inherited from ' + (convRef || 'the conversion that produced it')
+    : '';
   preview.innerHTML =
     'System: <strong>' + sysQty + ' ' + unit + '</strong> → After: <strong>' + after + ' ' + unit + '</strong> ' +
     '(<span class="fw-bold ' + badgeCls + '">' + sign + absQty + '</span>) · ' +
-    'Est. P&amp;L Impact: <span class="fw-bold ' + badgeCls + '">' + (delta < 0 ? '-Rs. ' : '+Rs. ') + valFmt + '</span>';
+    'Est. P&amp;L Impact: <span class="fw-bold ' + badgeCls + '">' + (delta < 0 ? '-Rs. ' : '+Rs. ') + valFmt + '</span>' +
+    (openHint ? '<br><span class="small text-info"><i class="bi bi-arrow-left-right"></i> ' + openHint + '</span>' : '');
 }
 
 function openEditAdjustmentModal(btn) {

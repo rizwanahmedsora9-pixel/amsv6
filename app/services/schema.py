@@ -1333,6 +1333,11 @@ def _bootstrap_database():
     except Exception:
         pass
     try:
+        from app.services.open_cement import ensure_open_cement_category
+        ensure_open_cement_category()
+    except Exception:
+        logging.getLogger('app').exception('Failed to initialise the Open Cement category')
+    try:
         _ensure_discount_columns()
     except Exception:
         pass

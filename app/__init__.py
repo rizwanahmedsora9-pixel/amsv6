@@ -352,6 +352,13 @@ def create_app(test_config: dict | None = None) -> Flask:
                 db.create_all()
                 _ensure_model_columns()
                 _ensure_loan_party_two_way_schema()
+                try:
+                    from app.services.open_cement import ensure_open_cement_category
+                    ensure_open_cement_category()
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        'Failed to initialise the Open Cement category'
+                    )
                 # Keep a fresh test database usable in the same way as a fresh
                 # production database.  The smoke tests and local developers
                 # rely on the documented Admin login even when no rows exist.

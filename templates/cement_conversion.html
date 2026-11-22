@@ -1,0 +1,347 @@
+{% extends "layout.html" %}
+{% from "_ui/page_header.html" import render as ui_header %}
+{% from "_ui/kpi_tile.html" import tile as ui_tile %}
+{% from "_ui/filter_bar.html" import bar as ui_filter_bar %}
+{% from "_ui/data_table_card.html" import card as ui_table_card %}
+{% block content %}
+<div class="ui-v2">
+
+  {% set _toolbar %}
+    <a href="{{ url_for('inventory.stock_summary') }}" class="btn btn-warning btn-pill fw-bold">
+      <i class="bi bi-graph-up me-1"></i> Stock Summary
+    </a>
+    <button type="button" class="btn btn-outline-secondary btn-pill fw-bold" onclick="window.print()">
+      <i class="bi bi-printer"></i>
+    </button>
+  {% endset %}
+  {{ ui_header('bi-arrow-left-right', 'Cement Bag to Open Cement Conversion',
+               subtitle='Convert purchased cement bags into KG-based Open Cement stock at the original GRN cost — no new purchase, no cash flow',
+               toolbar=_toolbar) }}
+
+  {% if saved_reference %}
+    <div class="alert alert-success mb-3"><i class="bi bi-check-circle me-1"></i> Saved conversion <strong>{{ saved_reference }}</strong>. See it in the history below.</div>
+  {% endif %}
+
+  {# ---------------- New Conversion ---------------- #}
+  <div class="ui-card border-primary border-opacity-50 mb-3" id="newConversionCard">
+    <div class="ui-card-header">
+      <h5><i class="bi bi-plus-circle text-primary"></i> New Conversion</h5>
+    </div>
+    <div class="ui-card-body">
+      <form method="POST" action="{{ url_for('inventory.cement_conversion_save') }}" id="cementConversionForm" class="ui-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="idempotency_key" id="idempotencyKey" value="">
+
+        <div class="ui-row">
+          <div class="ui-field ui-col-2">
+            <label class="ui-label">Conversion Date *</label>
+            <input type="date" name="conversion_date" id="ccDate" value="{{ today_str }}" class="form-control" required>
+            <small class="ui-helper" id="ccDateHint"></small>
+          </div>
+          <div class="ui-field ui-col-3">
+            <label class="ui-label">Source Cement Item *</label>
+            <select name="source_material" id="ccSource" class="form-select" required>
+              <option value="">-- Select bagged cement item --</option>
+              {% for m in source_materials %}
+              <option value="{{ m.id }}" data-unit="{{ m.unit or 'Bags' }}" data-stock="{{ '%.4f'|format(m.total or 0) }}">{{ m.name }}</option>
+              {% endfor %}
+            </select>
+            <small class="ui-helper" id="ccSourceStock"></small>
+          </div>
+          <div class="ui-field ui-col-2">
+            <label class="ui-label">Available Bag Stock</label>
+            <input type="text" id="ccAvailableStock" class="form-control" readonly value="—">
+          </div>
+          <div class="ui-field ui-col-3">
+            <label class="ui-label">Destination Open Cement Item *</label>
+            <select name="dest_material" id="ccDest" class="form-select" required>
+              <option value="">-- Linked Open Cement item --</option>
+            </select>
+            <small class="ui-helper">Only the Open Cement item linked to the selected source is offered.</small>
+          </div>
+          <div class="ui-field ui-col-2">
+            <label class="ui-label">Conversion Qty (bags) *</label>
+            <input type="number" name="bags" id="ccBags" step="0.001" min="0.001" class="form-control" required>
+            <small class="ui-helper" id="ccBagsHint"></small>
+          </div>
+        </div>
+
+        <div class="ui-row mt-2">
+          <div class="ui-field ui-col-2">
+            <label class="ui-label">Weight per Bag (kg)</label>
+            <input type="number" name="weight_per_bag" id="ccWeight" step="0.001" min="0.001" value="{{ default_bag_weight }}" class="form-control">
+            <small class="ui-helper">Default 50 kg.</small>
+          </div>
+          <div class="ui-field ui-col-2">
+            <label class="ui-label">Total Open Cement Produced (kg)</label>
+            <input type="text" id="ccKgProduced" class="form-control" readonly value="—">
+          </div>
+          <div class="ui-field ui-col-2">
+            <label class="ui-label">Original Purchase Cost / Bag (Rs.)</label>
+            <input type="text" id="ccCostPerBag" class="form-control" readonly value="—">
+          </div>
+          <div class="ui-field ui-col-2">
+            <label class="ui-label">Total Transferred Cost (Rs.)</label>
+            <input type="text" id="ccTotalCost" class="form-control" readonly value="—">
+          </div>
+          <div class="ui-field ui-col-4">
+            <label class="ui-label">Remarks</label>
+            <input type="text" name="note" id="ccNote" class="form-control" maxlength="500" placeholder="Optional note recorded on the conversion">
+          </div>
+        </div>
+
+        <div class="ui-row mt-2">
+          <div class="ui-field ui-col-12">
+            <div id="ccPreviewAlerts" class="mb-2"></div>
+            <button type="submit" class="btn btn-danger btn-pill fw-bold" id="ccSaveBtn">
+              <i class="bi bi-box-arrow-right me-1"></i> Save Conversion
+            </button>
+            <small class="ui-helper ms-2">Saving posts one source OUT (bags) and one destination IN (kg) movement sharing this conversion ID. No GRN, supplier payable, or cash flow is created.</small>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {# ---------------- History ---------------- #}
+  {% set _h_filters %}
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">From Date</label>
+      <input type="date" name="date_from" value="{{ filters.date_from }}" class="form-control">
+    </div>
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">To Date</label>
+      <input type="date" name="date_to" value="{{ filters.date_to }}" class="form-control">
+    </div>
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">Source Cement</label>
+      <select name="source_material" class="form-select">
+        <option value="">All sources</option>
+        {% for m in source_materials %}
+        <option value="{{ m.name }}" {{ 'selected' if filters.source_material == m.name }}>{{ m.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="ui-field ui-col-2">
+      <label class="ui-label">Open Cement Item</label>
+      <select name="dest_material" class="form-select">
+        <option value="">All open items</option>
+        {% for m in open_items %}
+        <option value="{{ m.name }}" {{ 'selected' if filters.dest_material == m.name }}>{{ m.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="ui-field ui-col-3">
+      <label class="ui-label">Search (ID / remarks / user)</label>
+      <input type="text" name="q" value="{{ filters.q }}" class="form-control" placeholder="e.g. CC-20260101-0007">
+    </div>
+    <div class="ui-actions ui-col-1 d-flex align-items-end">
+      <button class="btn btn-warning"><i class="bi bi-funnel"></i> Apply</button>
+      <a class="btn btn-outline-secondary" href="{{ url_for('inventory.cement_conversion') }}">Clear</a>
+    </div>
+  {% endset %}
+  {% call ui_filter_bar(url_for('inventory.cement_conversion')) %}{{ _h_filters }}{% endcall %}
+
+  {% set _hist_toolbar %}
+    <button type="button" class="btn btn-outline-secondary btn-sm fw-bold" onclick="copyConversionTable()" title="Copy table">
+      <i class="bi bi-clipboard"></i> Copy
+    </button>
+    <a href="{{ url_for('inventory.cement_conversion_export', **filters) }}" class="btn btn-outline-success btn-sm fw-bold">
+      <i class="bi bi-file-earmark-excel"></i> Excel
+    </a>
+  {% endset %}
+  {% call ui_table_card('Conversion History', 'bi-clock-history', _hist_toolbar) %}
+    <table class="ui-table" id="conversionHistoryTable">
+      <thead>
+        <tr>
+          <th>Conversion ID</th>
+          <th>Date</th>
+          <th>Source</th>
+          <th>Destination</th>
+          <th class="num">Bags</th>
+          <th class="num">KG Produced</th>
+          <th class="num">Cost / Bag (Rs.)</th>
+          <th class="num">Total Transferred (Rs.)</th>
+          <th class="num">Remaining Source Stock</th>
+          <th>User</th>
+          <th>Remarks</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in history.rows %}
+        <tr class="is-clickable" data-href="{{ url_for('inventory.cement_conversion_detail', conversion_id=row.id) }}">
+          <td class="fw-bold">{{ row.reference }}</td>
+          <td>{{ row.conversion_date }}</td>
+          <td>{{ row.source_material }}</td>
+          <td>{{ row.dest_material }}</td>
+          <td class="num">{{ '%.3f'|format(row.bags_converted) }} {{ row.source_unit }}</td>
+          <td class="num">{{ '%.3f'|format(row.kg_produced) }} {{ row.dest_unit }}</td>
+          <td class="num">{{ '%.2f'|format(row.source_cost_per_bag) }} / {{ row.source_unit }}</td>
+          <td class="num">Rs. {{ '%.2f'|format(row.total_transferred_cost) }}</td>
+          <td class="num">{{ '%.3f'|format(row.source_stock_after or 0) }} {{ row.source_unit }}</td>
+          <td>{{ row.created_by }}</td>
+          <td>{{ row.note }}</td>
+          <td>
+            {% if row.status == 'REVERSED' %}
+              <span class="badge bg-secondary">REVERSED</span>
+            {% else %}
+              <span class="badge bg-success">ACTIVE</span>
+            {% endif %}
+          </td>
+          <td><a href="{{ url_for('inventory.cement_conversion_detail', conversion_id=row.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i> View</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="13" class="ui-empty">No cement conversions recorded yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if history.pages > 1 %}
+    <div class="d-flex justify-content-between align-items-center p-2">
+      <div class="small text-muted">Page {{ history.page }} of {{ history.pages }} · {{ history.total }} conversions</div>
+      <div>
+        {% if history.page > 1 %}<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('inventory.cement_conversion', **dict(filters, page=history.page-1)) }}">&larr; Prev</a>{% endif %}
+        {% if history.page < history.pages %}<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('inventory.cement_conversion', **dict(filters, page=history.page+1)) }}">Next &rarr;</a>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+  {% endcall %}
+
+</div>
+
+<script>
+function copyConversionTable() {
+  var table = document.getElementById('conversionHistoryTable');
+  if (!table) return;
+  var lines = [];
+  table.querySelectorAll('tr').forEach(function (tr) {
+    var cells = [];
+    tr.querySelectorAll('th, td').forEach(function (c) {
+      cells.push((c.innerText || c.textContent || '').trim());
+    });
+    if (cells.length) lines.push(cells.join('\t'));
+  });
+  var text = lines.join('\n');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text);
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+}
+(function () {
+  var form = document.getElementById('cementConversionForm');
+  var sourceSel = document.getElementById('ccSource');
+  var destSel = document.getElementById('ccDest');
+  var bagsInput = document.getElementById('ccBags');
+  var weightInput = document.getElementById('ccWeight');
+  var idemInput = document.getElementById('idempotencyKey');
+  var previewTimer = null;
+  var lastSourceId = null;
+
+  function csrf() {
+    return (form.querySelector('input[name="_csrf_token"]') || {}).value || '';
+  }
+
+  function fmt(v, digits) {
+    if (v === null || v === undefined || v === '' || isNaN(v)) return '—';
+    return Number(v).toLocaleString('en-PK', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  }
+
+  function setReadOnly(id, value) {
+    var el = document.getElementById(id);
+    if (el) el.value = value;
+  }
+
+  function setAlerts(list) {
+    var box = document.getElementById('ccPreviewAlerts');
+    if (!box) return;
+    if (!list.length) { box.innerHTML = ''; return; }
+    box.innerHTML = list.map(function (a) {
+      var cls = a.type === 'error' ? 'danger' : (a.type === 'warn' ? 'warning' : 'info');
+      return '<div class="alert alert-' + cls + ' py-2 mb-1">' + a.message + '</div>';
+    }).join('');
+  }
+
+  function loadLinkedOpen(sourceId) {
+    destSel.innerHTML = '<option value="">-- Linked Open Cement item --</option>';
+    if (!sourceId) return;
+    fetch("{{ url_for('inventory.cement_conversion_preview') }}?source=" + encodeURIComponent(sourceId) + "&bags=" + encodeURIComponent(bagsInput.value || '0') + "&weight_per_bag=" + encodeURIComponent(weightInput.value || '') + "&date=" + encodeURIComponent(document.getElementById('ccDate').value || ''))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok || !data.linked_open) return;
+        data.linked_open.forEach(function (m) {
+          var opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = m.name + ' (' + m.unit + ')';
+          destSel.appendChild(opt);
+        });
+        if (data.linked_open.length === 1) destSel.value = data.linked_open[0].id;
+      });
+  }
+
+  function refreshPreview() {
+    var sourceId = sourceSel.value;
+    var bags = parseFloat(bagsInput.value);
+    var weight = parseFloat(weightInput.value);
+    var opt = sourceSel.options[sourceSel.selectedIndex];
+    setReadOnly('ccAvailableStock', opt ? fmt(parseFloat(opt.getAttribute('data-stock')), 3) + ' ' + (opt.getAttribute('data-unit') || 'Bags') : '—');
+    setReadOnly('ccKgProduced', (isNaN(bags) || isNaN(weight)) ? '—' : fmt(bags * weight, 3) + ' kg');
+    if (!sourceId) {
+      setReadOnly('ccCostPerBag', '—');
+      setReadOnly('ccTotalCost', '—');
+      setAlerts([]);
+      return;
+    }
+    if (sourceId !== lastSourceId) { lastSourceId = sourceId; loadLinkedOpen(sourceId); }
+    fetch("{{ url_for('inventory.cement_conversion_preview') }}?source=" + encodeURIComponent(sourceId) + "&bags=" + encodeURIComponent(bagsInput.value || '0') + "&weight_per_bag=" + encodeURIComponent(weightInput.value || '') + "&date=" + encodeURIComponent(document.getElementById('ccDate').value || ''))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok) {
+          setReadOnly('ccCostPerBag', '—');
+          setReadOnly('ccTotalCost', '—');
+          setAlerts([{ type: 'error', message: data.error || 'Could not preview this conversion.' }]);
+          return;
+        }
+        setReadOnly('ccCostPerBag', fmt(data.cost_per_bag, 2));
+        setReadOnly('ccTotalCost', fmt(data.total_cost, 2));
+        var alerts = [];
+        if (!data.sufficient_stock) alerts.push({ type: 'error', message: 'Not enough bagged stock on the conversion date. Available: ' + fmt(data.available_stock, 3) + ' ' + data.source_unit + '.' });
+        else if (!data.covered) alerts.push({ type: 'error', message: 'No costing layer (GRN lot) covers these bags on that date; the original purchase cost cannot be inherited.' });
+        if (data.linked_open.length === 0) alerts.push({ type: 'error', message: 'This source has no linked Open Cement item. Link one on Inventory → Add Material first.' });
+        if (data.linked_open.length > 1) alerts.push({ type: 'warn', message: 'More than one Open Cement item is linked to this source; pick the intended one.' });
+        setAlerts(alerts);
+      });
+  }
+
+  sourceSel.addEventListener('change', function () { lastSourceId = null; refreshPreview(); });
+  bagsInput.addEventListener('input', function () { clearTimeout(previewTimer); previewTimer = setTimeout(refreshPreview, 250); });
+  weightInput.addEventListener('input', function () { clearTimeout(previewTimer); previewTimer = setTimeout(refreshPreview, 250); });
+  document.getElementById('ccDate').addEventListener('change', function () { clearTimeout(previewTimer); previewTimer = setTimeout(refreshPreview, 250); });
+
+  form.addEventListener('submit', function (e) {
+    if (!idemInput.value) {
+      idemInput.value = (crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(16).slice(2)));
+    }
+    var bags = parseFloat(bagsInput.value);
+    var weight = parseFloat(weightInput.value);
+    if (!(bags > 0) || !(weight > 0)) {
+      e.preventDefault();
+      setAlerts([{ type: 'error', message: 'Enter a positive bag quantity and weight per bag.' }]);
+      return;
+    }
+    if (destSel.value === '') {
+      e.preventDefault();
+      setAlerts([{ type: 'error', message: 'Select the destination Open Cement item.' }]);
+    }
+  });
+
+  if (sourceSel.value) { refreshPreview(); }
+})();
+</script>
+{% endblock %}

@@ -702,7 +702,7 @@
                                         </div>
                                         <div id="addSaleMaterialList0" class="combobox-list shadow-lg" style="display: none;">
                                             {% for mat in materials %}
-                                            <div class="combobox-item" data-value="{{ mat.name }}" data-material-id="{{ mat.id }}" data-combo-code="{{ mat.name }}" data-combo-name="{{ mat.name }}" data-combo-input="addSaleMaterialSearch0" data-combo-display="addSaleMaterialDisplay0" data-combo-after="onSaleMaterialPicked">
+                                            <div class="combobox-item" data-value="{{ mat.name }}" data-material-id="{{ mat.id }}" data-open-cement="{{ '1' if mat.category and mat.category.name|lower == 'open cement' else '0' }}" data-combo-code="{{ mat.name }}" data-combo-name="{{ mat.name }}" data-combo-input="addSaleMaterialSearch0" data-combo-display="addSaleMaterialDisplay0" data-combo-after="onSaleMaterialPicked">
                                                 <span class="fw-bold text-warning code-span">{{ mat.name }}</span>
                                             </div>
                                             {% endfor %}
@@ -755,6 +755,16 @@
                                             <button class="btn btn-outline-secondary btn-sm" type="button" onclick="changeSaleQty(this, -1)">-</button>
                                             <input type="number" step="any" name="qty[]" value="1" class="form-control bg-dark text-white border-secondary text-center qty-input w-qty" style="font-size: 1.05rem; font-weight: 700; padding: 0.475rem 0.5rem;" required>
                                             <button class="btn btn-outline-secondary btn-sm" type="button" onclick="changeSaleQty(this, 1)">+</button>
+                                        </div>
+                                        {# Open Cement is stocked in KG but is often sold by the
+                                           keg.  Entering kegs here only fills the KG quantity —
+                                           the sale, stock deduction and costing stay in KG. #}
+                                        <div class="keg-helper mt-1" style="display:none;" title="Open Cement: sell by keg">
+                                            <div class="input-group input-group-sm">
+                                                <input type="number" step="any" min="0" name="keg_qty[]" class="form-control bg-dark text-white border-secondary keg-qty" placeholder="Kegs">
+                                                <span class="input-group-text bg-dark text-white border-secondary small">×</span>
+                                                <input type="number" step="any" min="0" name="keg_kg[]" class="form-control bg-dark text-white border-secondary keg-kg" placeholder="kg/keg" value="50">
+                                            </div>
                                         </div>
                                     </div>
                                     <div class="rate-cell position-relative">
@@ -1071,6 +1081,9 @@
 </style>
 <script>
 let saleMaterialRowCounter = 0;
+// Names of Open Cement items on this sheet; only these rows offer the keg
+// helper.  The sale still posts and deducts stock in KG.
+const OPEN_CEMENT_MATERIAL_NAMES = {{ open_cement_material_names | default([], true) | tojson }};
 const bookedEligibleClientCodes = new Set({{ (booked_client_codes or [])|tojson }});
 const knownClientCodes = new Set({{ (clients | map(attribute='code') | list)|tojson }});
 const knownClientNames = new Set({{ (clients | map(attribute='name') | list)|tojson }});
@@ -1207,10 +1220,48 @@ function onSaleMaterialPicked(code, name, inputId) {
         if (grnDisplay) grnDisplay.innerText = '';
         filterSaleGrnItems(row);
         syncServiceAlternateState(row);
+        syncKegHelper(row);
         checkItemBookingStatus(row);
     }
 }
 window.onSaleMaterialPicked = onSaleMaterialPicked;
+
+// Open Cement rows may be sold by the keg.  The helper only writes the KG
+// quantity; the posted line, stock deduction and FIFO cost stay in KG.
+function isRowOpenCement(row) {
+    if (!row) return false;
+    let name = (row.dataset.saleMaterial || '').trim();
+    if (!name) {
+        const input = row.querySelector('.price-trigger');
+        name = input ? (input.value || '').trim() : '';
+    }
+    const lowered = name.toLowerCase();
+    return OPEN_CEMENT_MATERIAL_NAMES.some(n => (n || '').trim().toLowerCase() === lowered);
+}
+
+function syncKegHelper(row) {
+    const helper = row && row.querySelector('.keg-helper');
+    if (!helper) return;
+    const open = isRowOpenCement(row);
+    helper.style.display = open ? '' : 'none';
+    if (!open) {
+        const q = row.querySelector('.keg-qty');
+        if (q) q.value = '';
+    }
+}
+
+function applyKegHelper(row) {
+    if (!isRowOpenCement(row)) return;
+    const kegs = parseFloat(row.querySelector('.keg-qty')?.value);
+    const perKeg = parseFloat(row.querySelector('.keg-kg')?.value);
+    const qtyInput = row.querySelector('.qty-input');
+    if (!qtyInput || !(kegs > 0) || !(perKeg > 0)) return;
+    qtyInput.value = Math.round(kegs * perKeg * 10000) / 10000;
+    qtyInput.dispatchEvent(new Event('input', { bubbles: true }));
+    updateSalePrice(row.closest('form'));
+}
+window.syncKegHelper = syncKegHelper;
+window.applyKegHelper = applyKegHelper;
 
 function filterSaleGrnItems(row) {
     if (!row) return;
@@ -2103,7 +2154,18 @@ function attachSaleListeners(row) {
     const ignoreHidden = row.querySelector('.ignore-booking-hidden');
     syncSaleRowToggleButton(row);
     syncServiceAlternateState(row);
-    
+    syncKegHelper(row);
+    const kegQty = row.querySelector('.keg-qty');
+    const kegKg = row.querySelector('.keg-kg');
+    if (kegQty && kegQty.dataset.kegGuardBound !== '1') {
+        kegQty.dataset.kegGuardBound = '1';
+        kegQty.addEventListener('input', () => applyKegHelper(row));
+    }
+    if (kegKg && kegKg.dataset.kegGuardBound !== '1') {
+        kegKg.dataset.kegGuardBound = '1';
+        kegKg.addEventListener('input', () => applyKegHelper(row));
+    }
+
     if (materialInput) {
         materialInput.addEventListener('input', () => checkItemBookingStatus(row));
         materialInput.addEventListener('change', () => checkItemBookingStatus(row));
@@ -2957,7 +3019,11 @@ function initializeLazyEditSaleModal(modalEl) {
     const form = modalEl.querySelector('form');
     if (!form) return;
 
-    form.querySelectorAll('.compact-item-row').forEach(row => attachSaleListeners(row));
+    form.querySelectorAll('.compact-item-row').forEach(row => {
+        const materialInput = row.querySelector('.price-trigger');
+        if (materialInput && materialInput.value) row.dataset.saleMaterial = materialInput.value;
+        attachSaleListeners(row);
+    });
     bindManualInputBehavior(modalEl);
     attachFormListeners(form);
     bindEditFormClientMode(form);

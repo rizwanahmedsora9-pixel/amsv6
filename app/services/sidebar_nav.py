@@ -147,6 +147,18 @@ SIDEBAR_LINKS: Tuple[NavLink, ...] = (
         description="Lost, damaged, and physical count stock adjustments.",
     ),
     NavLink(
+        key="cement_conversion",
+        label="Convert Cement Bags to Open Cement",
+        icon="bi-arrow-left-right",
+        endpoint="inventory.cement_conversion",
+        fallback_url="/inventory/cement_conversion",
+        exact=("/cement_conversion",),
+        prefix=("/inventory/cement_conversion",),
+        perm=_only("can_view_stock"),
+        default_category="inventory",
+        description="Convert purchased cement bags into KG-based Open Cement stock.",
+    ),
+    NavLink(
         key="daily_transactions",
         label="Daily Breakdown",
         icon="bi-list-check",
