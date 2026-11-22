@@ -656,7 +656,7 @@
   <details class="ui-card mb-4 d-print-none">
     <summary class="ui-card-header" style="cursor:pointer;">
       <h5 class="mb-0 d-inline"><i class="bi bi-sliders2 me-2 text-warning"></i> Master Data Management</h5>
-      <small class="text-muted ms-2">Manage categories, sub-categories, and parties. <strong>Edit</strong> renames in place and history follows the row. <strong>Disable</strong> suspends a master (reversible, history keeps the name). <strong>Delete</strong> is only offered for a master no entry uses. A disabled master cannot be picked for a new entry and is never revived by typing its name.</small>
+      <small class="text-muted ms-2">Manage categories, sub-categories, and parties. <strong>Edit</strong> renames in place and history follows the row. <strong>Disable</strong> suspends a master (reversible, history keeps the name). <strong>Delete</strong> is only offered for a master no entry uses. Voiding a transaction (the <em>Void</em> action) keeps the document, so a voided row still counts as history — to delete a category that has any transactions, use <strong>Remove entries &amp; delete</strong>: it reverses and removes them, then deletes the category. A disabled master cannot be picked for a new entry and is never revived by typing its name.</small>
     </summary>
     <div class="ui-card-body">
       <div class="row g-3 mb-4">
@@ -748,8 +748,12 @@
                     <button class="btn btn-sm btn-outline-success" name="action" value="restore_category" type="submit" title="Make this category selectable again.">Restore</button>
                     {% endif %}
                     {% if c.id in (used_category_ids or []) %}
+                    {% set _rows = ((cf_category_counts or {}).get(c.id) or {}).get('total', 0) %}
                     <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="Used by historical transactions. Disable instead of deleting.">Delete</button>
-                    <span class="small text-muted align-self-center">In use — disable instead</span>
+                    <button class="btn btn-sm btn-outline-danger" name="action" value="purge_category_entries" type="submit"
+                            title="Void and remove every transaction in this category, then delete the category. Each money effect is reversed first."
+                            onclick="return confirm('This removes {{ _rows }} transaction(s) from this category (their money effect is reversed) and then deletes the category. This cannot be undone. Continue?');">Remove entries &amp; delete</button>
+                    <span class="small text-muted align-self-center">In use — disable instead, or remove its {{ _rows }} transaction(s)</span>
                     {% else %}
                     <button class="btn btn-sm btn-outline-danger" name="action" value="delete_category" type="submit" onclick="return confirm('Permanently delete this unused category?');">Delete</button>
                     {% endif %}
@@ -788,7 +792,10 @@
                     {% endif %}
                     {% if s.id in (used_subcategory_ids or []) %}
                     <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="Used by historical transactions. Disable instead of deleting.">Delete</button>
-                    <span class="small text-muted align-self-center">In use — disable instead</span>
+                    <button class="btn btn-sm btn-outline-danger" name="action" value="purge_subcategory_entries" type="submit"
+                            title="Void and remove every transaction in this sub-category, then delete the sub-category. Each money effect is reversed first."
+                            onclick="return confirm('This removes the transaction(s) in this sub-category (their money effect is reversed) and then deletes the sub-category. This cannot be undone. Continue?');">Remove entries &amp; delete</button>
+                    <span class="small text-muted align-self-center">In use — disable instead, or remove its transactions</span>
                     {% else %}
                     <button class="btn btn-sm btn-outline-danger" name="action" value="delete_subcategory" type="submit" onclick="return confirm('Permanently delete this unused sub-category?');">Delete</button>
                     {% endif %}

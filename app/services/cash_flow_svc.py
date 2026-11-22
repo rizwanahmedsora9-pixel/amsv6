@@ -1033,10 +1033,67 @@ def cf_used_subcategory_ids():
 
 
 def cf_used_party_ids():
+    """Party ids history refers to — cash-flow rows **and** GRN links.
+
+    The panel uses this to decide whether Delete is offered.  A party used only
+    as a GRN charge recipient / supplier-payment payee has no cash-flow entry,
+    so counting entries alone offered a Delete that the database refused.
+    """
     rows = db.session.query(CashFlowEntry.party_id).filter(
         CashFlowEntry.party_id.isnot(None)
     ).distinct().all()
-    return {row[0] for row in rows}
+    used = {row[0] for row in rows}
+    try:
+        from models.stock import GRNCharge
+        from models.parties import SupplierPayment
+
+        used.update(
+            row[0] for row in db.session.query(GRNCharge.recipient_party_id).filter(
+                GRNCharge.recipient_party_id.isnot(None)).distinct().all()
+        )
+        used.update(
+            row[0] for row in db.session.query(
+                SupplierPayment.recipient_party_id).filter(
+                SupplierPayment.recipient_party_id.isnot(None)).distinct().all()
+        )
+    except Exception:
+        pass
+    return used
+
+
+# ---------------------------------------------------------------------------
+# "In use" — every table that can point at a cash-flow master
+# ---------------------------------------------------------------------------
+# A master row can be referenced by more than the cash-flow history the service
+# already knew about.  ``cash_flow_party`` is also the recipient master for GRN
+# charges and the supplier payments that settle them
+# (``grn_charge.recipient_party_id`` / ``supplier_payment.recipient_party_id``).
+# Those references are invisible to ``cf_used_party_ids``, so a party used only
+# by a GRN cost looked *unused*: the Delete button was offered, the ORM sent the
+# DELETE, SQLite refused it with ``FOREIGN KEY constraint failed`` — and the
+# operator only ever saw "The operation could not be completed due to a data
+# error. No changes were saved."  Delete must refuse with a readable reason
+# *before* it reaches the database, never with the generic sanitised flash.
+def _cf_party_reference_counts(party_id):
+    """``{module label: row count}`` for every non-entry table pointing here."""
+    from models.stock import GRNCharge
+    from models.parties import SupplierPayment
+
+    counts = {}
+    try:
+        n = GRNCharge.query.filter(GRNCharge.recipient_party_id == party_id).count()
+        if n:
+            counts['GRN charges'] = n
+    except Exception:
+        pass
+    try:
+        n = SupplierPayment.query.filter(
+            SupplierPayment.recipient_party_id == party_id).count()
+        if n:
+            counts['Supplier payments'] = n
+    except Exception:
+        pass
+    return counts
 
 
 def _cf_category_is_used(category_id):
@@ -1058,23 +1115,19 @@ def delete_cf_category(category_id):
     if not cat:
         raise ValueError('Category not found.')
     linked_modules = []
-    if CashFlowEntry.query.filter(CashFlowEntry.category_id == cat.id).first():
-        linked_modules.append('CashFlowEntry')
-    sub_ids = [
-        row[0] for row in db.session.query(CashFlowSubcategory.id).filter(
-            CashFlowSubcategory.category_id == cat.id
-        ).all()
-    ]
-    if sub_ids:
-        if CashFlowEntry.query.filter(CashFlowEntry.subcategory_id.in_(sub_ids)).first():
-            linked_modules.append('CashFlowEntry (via subcategory)')
-        # If subcategories exist but are not directly linked to entries,
-        # deleting the category will cascade-remove them (clear link message)
-        if not linked_modules:
-            linked_modules.append('CashFlowSubcategory (will be removed with category)')
+    rows = _cf_category_entry_rows(cat.id)
+    if rows:
+        linked_modules.append(f'{len(rows)} cash-flow transaction(s)')
+    elif _cf_category_sub_ids(cat.id):
+        # No entry uses them, so they go with the category — say so plainly.
+        linked_modules.append('its sub-categories (removed with the category)')
     if _cf_category_is_used(cat.id):
-        msg = 'This category is linked to: ' + ', '.join(linked_modules) if linked_modules else 'This category is used by historical transactions.'
-        msg += ' Cannot delete — disable it instead, or delete from the linked modules first.'
+        msg = ('This category is still used by ' + ' and '.join(linked_modules)
+               if linked_modules else
+               'This category is used by historical transactions.')
+        msg += (' Cannot delete. Voided rows still count as history — remove those '
+                'entries from Cash Flow first (or press "Remove entries & delete" '
+                'in Master Data), otherwise disable the category instead.')
         raise ValueError(msg)
     # Remove the children through the relationship, not a bulk DELETE.  A bulk
     # DELETE leaves any already-loaded ``subcategories`` collection holding rows
@@ -1084,13 +1137,168 @@ def delete_cf_category(category_id):
     # the relationship in step and still sends exactly one DELETE per row.
     children = CashFlowSubcategory.query.filter(
         CashFlowSubcategory.category_id == cat.id
-    ).all() if sub_ids else []
+    ).all()
     for child in children:
         db.session.delete(child)
     db.session.flush()
     db.session.delete(cat)
     db.session.flush()
+    _cf_note_shrink(1 + len(children))
     return True
+
+
+def _cf_category_sub_ids(category_id):
+    return [
+        row[0] for row in db.session.query(CashFlowSubcategory.id).filter(
+            CashFlowSubcategory.category_id == category_id
+        ).all()
+    ]
+
+
+def _cf_category_entry_rows(category_id):
+    """Distinct history rows attached to a category, directly or via a sub.
+
+    One row normally carries both ``category_id`` and ``subcategory_id``; a
+    simple ``count() + count()`` therefore reported twice the real number.
+    """
+    sub_ids = _cf_category_sub_ids(category_id)
+    conditions = [CashFlowEntry.category_id == category_id]
+    if sub_ids:
+        conditions.append(CashFlowEntry.subcategory_id.in_(sub_ids))
+    return CashFlowEntry.query.filter(or_(*conditions)).all()
+
+
+def cf_category_entry_counts(category_id):
+    """``{'total': n, 'direct': d}`` history rows still attached to a category.
+
+    The Master Data panel uses this to choose between the plain Delete button
+    and "Remove entries & delete", so the operator is never offered a control
+    that the service would refuse — and sees the real number of rows involved.
+    """
+    rows = _cf_category_entry_rows(category_id)
+    direct = sum(1 for row in rows if row.category_id == category_id)
+    return {'total': len(rows), 'direct': direct}
+
+
+def _cf_note_shrink(n=1):
+    """Tell the boot health guard that these rows were deleted on purpose.
+
+    Without this, deleting business rows looks like data loss at the next
+    restart (``DB row count dropped … Refusing to start``).
+    """
+    try:
+        from app.services.health import note_db_shrink
+        note_db_shrink(n)
+    except Exception:
+        pass
+
+
+def purge_cf_category_entries(category_id, *, actor=None, reason=None, subcategory_id=None):
+    """Empty a category by **really** removing its transactions, then let the
+    caller delete the category itself.
+
+    Why this exists
+    ---------------
+    "Remove all entries, then delete the category" looked like it should work:
+    the operator voids every row and presses Delete.  It never could, for two
+    reasons:
+
+    * ``void_entry`` is a **void**, not a delete — the row, its ``category_id``
+      and its whole audit trail stay in the database (that is deliberate, the
+      money effect is reversed but the document is kept).
+    * ``_cf_category_is_used`` counts every ``cash_flow_entry`` row, voided or
+      not, so a category with only voided history is still "in use" and the
+      delete is refused.
+
+    This helper is the path the operator actually asked for: it reverses and
+    removes each still-live entry (reusing ``void_manual_cash_flow_entry`` so
+    the account balance is restored by the same audited code, never by a raw
+    UPDATE), then hard-deletes the entry rows together with their
+    ``cash_flow_entry_audit`` children before the parent row goes.
+
+    Returns ``{'voided': n, 'removed': n}``.  Raises ``ValueError`` with a
+    readable message when the category cannot be emptied safely — the caller
+    never sees a generic data error from this path.
+    """
+    try:
+        from app.services.accounting import _void_account_tx  # noqa: F401  (import guard)
+    except Exception:
+        pass
+
+    cat = _cf_lookup(CashFlowCategory, category_id)
+    if not cat:
+        raise ValueError('Category not found.')
+    sub_ids = [
+        row[0] for row in db.session.query(CashFlowSubcategory.id).filter(
+            CashFlowSubcategory.category_id == cat.id
+        ).all()
+    ]
+    # ``subcategory_id`` narrows the purge to one sub-category (Master Data
+    # offers the same button per sub-category); the category itself is only
+    # deleted by the caller after the whole category is empty.
+    entries = CashFlowEntry.query.filter(
+        or_(
+            CashFlowEntry.category_id == cat.id,
+            CashFlowEntry.subcategory_id.in_(sub_ids) if sub_ids else False,
+        )
+    )
+    if subcategory_id:
+        entries = entries.filter(CashFlowEntry.subcategory_id == subcategory_id)
+    entries = entries.all()
+    if not entries:
+        return {'voided': 0, 'removed': 0}
+
+    voided = 0
+    # Every entry's ledger row goes with it, whether it was still live (voided
+    # below) or already voided by the operator.
+    ledger_ids = [int(e.account_tx_id) for e in entries if e.account_tx_id]
+    for entry in entries:
+        if not entry.is_void:
+            # Reverse the money through the same helper the Void button uses —
+            # a closed period then raises ValueError with a readable message
+            # before anything is removed.
+            void_manual_cash_flow_entry(
+                entry, reason=(reason or 'Category removed from Master Data'),
+                actor=actor,
+            )
+            voided += 1
+    db.session.flush()
+
+    entry_ids = [entry.id for entry in entries]
+    # The audit trail is NOT NULL on entry_id, so it must go before its parent
+    # (this was the ``NOT NULL constraint failed: cash_flow_entry_audit.entry_id``
+    # failure that made an ordinary delete impossible).
+    for row in CashFlowEntryAudit.query.filter(
+            CashFlowEntryAudit.entry_id.in_(entry_ids)).all():
+        db.session.delete(row)
+    db.session.flush()
+    for entry in entries:
+        db.session.delete(entry)
+    db.session.flush()
+
+    # The ledger row an entry owned has nothing left to describe once the entry
+    # is gone: keeping it would leave Cash Flow and Accounts disagreeing (a
+    # money movement with no document, or a filtered/voided orphan).  Both live
+    # and already-voided rows are reversed by the time we get here, so removing
+    # them changes no balance.  Those still referenced by another document are
+    # left alone.
+    removed_ledger = 0
+    for tx_id in dict.fromkeys(ledger_ids):
+        tx = db.session.get(AccountTransaction, tx_id)
+        if tx is None:
+            continue
+        if CashFlowEntry.query.filter(CashFlowEntry.account_tx_id == tx.id).count():
+            continue
+        try:
+            db.session.delete(tx)
+            removed_ledger += 1
+        except Exception:
+            logging.getLogger(__name__).warning(
+                'cash flow purge: could not remove ledger row %s', tx.id,
+                exc_info=True)
+    db.session.flush()
+    _cf_note_shrink(len(entry_ids) + removed_ledger)
+    return {'voided': voided, 'removed': len(entry_ids)}
 
 
 def delete_cf_subcategory(subcategory_id):
@@ -1098,32 +1306,46 @@ def delete_cf_subcategory(subcategory_id):
     sub = _cf_lookup(CashFlowSubcategory, subcategory_id)
     if not sub:
         raise ValueError('Sub-category not found.')
-    linked_modules = []
-    if CashFlowEntry.query.filter(CashFlowEntry.subcategory_id == sub.id).first():
-        linked_modules.append('CashFlowEntry')
-    if linked_modules:
-        msg = 'This sub-category is linked to: ' + ', '.join(linked_modules)
-        msg += '. Cannot delete — disable it instead, or delete from the linked modules first.'
-        raise ValueError(msg)
+    used = CashFlowEntry.query.filter(CashFlowEntry.subcategory_id == sub.id).count()
+    if used:
+        raise ValueError(
+            f'This sub-category is still used by {used} cash-flow transaction(s), '
+            'and voided rows still count as history. Cannot delete — remove those '
+            'entries first (or use "Remove entries & delete" on its category), '
+            'or disable it instead.'
+        )
     db.session.delete(sub)
     db.session.flush()
+    _cf_note_shrink(1)
     return True
 
 
 def delete_cf_party(party_id):
-    """Hard-delete an unused party. Historically used parties must be disabled."""
+    """Hard-delete an unused party. Historically used parties must be disabled.
+
+    ``cash_flow_party`` is also the recipient master for GRN charges and the
+    supplier payments that settle them.  A party used only by a GRN cost has no
+    ``cash_flow_entry`` row, so the old check called it unused, offered Delete,
+    and the DELETE died on ``grn_charge.recipient_party_id`` — surfaced to the
+    operator as the generic "data error, no changes were saved" flash.  The
+    reference check now covers every table that points at the master.
+    """
     party = _cf_lookup(CashFlowParty, party_id)
     if not party:
         raise ValueError('Party not found.')
     linked_modules = []
-    if CashFlowEntry.query.filter(CashFlowEntry.party_id == party.id).first():
-        linked_modules.append('CashFlowEntry')
+    entries = CashFlowEntry.query.filter(CashFlowEntry.party_id == party.id).count()
+    if entries:
+        linked_modules.append(f'{entries} cash-flow transaction(s)')
+    for label, count in _cf_party_reference_counts(party.id).items():
+        linked_modules.append(f'{count} in {label}')
     if linked_modules:
-        msg = 'This party is linked to: ' + ', '.join(linked_modules)
-        msg += '. Cannot delete — disable it instead, or delete from the linked modules first.'
+        msg = ('This party is still used by ' + ', '.join(linked_modules)
+               + '. Cannot delete — disable it instead, or remove those links first.')
         raise ValueError(msg)
     db.session.delete(party)
     db.session.flush()
+    _cf_note_shrink(1)
     return True
 
 

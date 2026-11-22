@@ -59,6 +59,7 @@ from models import (
     Account,
     CashFlowCategory,
     CashFlowEntry,
+    CashFlowEntryAudit,
     CashFlowParty,
     CashFlowSubcategory,
     User,
@@ -625,7 +626,8 @@ def test_delete_a_category_used_only_through_a_subcategory_is_refused(desk):
         assert _cf_category_is_used(cat_id) is True
 
     post_action(web, 'delete_category', category_id=str(cat_id))
-    assert 'via subcategory' in last_flash(web)
+    message = last_flash(web)
+    assert 'still used by 1 cash-flow transaction(s)' in message, message
     with app.app_context():
         assert db.session.get(CashFlowCategory, cat_id) is not None
         assert db.session.get(CashFlowSubcategory, sub_id) is not None
@@ -1326,3 +1328,172 @@ def test_an_old_expense_cannot_be_moved_to_a_different_suspended_category(desk):
         assert CashFlowEntry.query.count() == 0
         assert db.session.get(CashFlowCategory, retired_id).is_active is False
         assert db.session.get(CashFlowCategory, old_cat_id).is_active is True
+
+
+# ---------------------------------------------------------------------------
+# "Remove all its entries, then delete it" — the lifecycle a shop actually runs
+# ---------------------------------------------------------------------------
+# Reporter's sequence: create a category, post transactions in it, suspend it,
+# edit it, empty it, then delete it.  Emptying it by *voiding* every row never
+# made the delete possible, because a void keeps the row (and its category_id)
+# by design — and the operator only had a generic "data error" to go on.
+def test_voiding_a_categories_transactions_does_not_make_it_deletable(desk):
+    """A void is not a delete: the refusal must be readable, not the data-error flash."""
+    app, web = desk
+    with app.app_context():
+        acc = make_account()
+        cat = make_category('Transport', direction='out')
+        sub = make_subcategory(cat, 'Loader')
+        entry = make_entry('out', 1500, acc, category=cat, subcategory=sub)
+        cat_id, entry_id = cat.id, entry.id
+        db.session.commit()
+
+    post_action(web, 'disable_category', category_id=str(cat_id))
+    post_action(web, 'void_entry', entry_id=str(entry_id), void_reason='cleanup')
+    assert 'voided' in last_flash(web)
+
+    post_action(web, 'delete_category', category_id=str(cat_id))
+    message = last_flash(web)
+    assert 'Cannot delete' in message
+    assert 'voided rows still count as history' in message.lower()
+    assert 'data error' not in message.lower(), 'the readable refusal was sanitised away'
+    with app.app_context():
+        assert db.session.get(CashFlowCategory, cat_id) is not None
+
+
+def test_remove_entries_and_delete_empties_the_category_in_one_step(desk):
+    """The full reporter lifecycle, ending with the category really gone."""
+    app, web = desk
+    with app.app_context():
+        acc = make_account()
+        cat = make_category('Transport', direction='out')
+        sub = make_subcategory(cat, 'Loader')
+        cat_id, sub_id, acc_id = cat.id, sub.id, acc.id
+        db.session.commit()
+        # Real entries (with their account movement), so the assertions below
+        # can see the purge reverse exactly the money it removes.
+        first, _ = save_manual_cash_flow_entry(
+            direction='out', amount=1500, account_id=acc_id,
+            category_id=cat_id, subcategory_id=sub_id, description='loader')
+        second, _ = save_manual_cash_flow_entry(
+            direction='out', amount=2500, account_id=acc_id,
+            category_id=cat_id, description='toll')
+        live_id, void_id = first.id, second.id
+        db.session.commit()
+
+    # suspend + edit, exactly like the report
+    post_action(web, 'disable_category', category_id=str(cat_id))
+    post_action(web, 'rename_category', category_id=str(cat_id),
+                category_name='Transport (edited)', category_direction='out',
+                category_notes='renamed while suspended')
+    assert 'Category updated' in last_flash(web)
+
+    # one of the two rows is voided first (the "remove the entries" attempt)
+    post_action(web, 'void_entry', entry_id=str(void_id), void_reason='cleanup')
+    with app.app_context():
+        balance_after_spend = db.session.get(Account, acc_id).balance
+        assert balance_after_spend == 500000.0 - 4000.0 + 2500.0, 'the void reversed one row'
+
+    # the offered button empties the category and deletes it
+    post_action(web, 'purge_category_entries', category_id=str(cat_id))
+    message = last_flash(web)
+    assert 'Category deleted' in message, message
+    assert 'data error' not in message.lower()
+    with app.app_context():
+        assert db.session.get(CashFlowCategory, cat_id) is None
+        assert db.session.get(CashFlowSubcategory, sub_id) is None
+        assert CashFlowEntry.query.filter(
+            CashFlowEntry.id.in_([live_id, void_id])).count() == 0
+        assert CashFlowEntryAudit.query.filter(
+            CashFlowEntryAudit.entry_id.in_([live_id, void_id])).count() == 0
+        # The ledger rows those entries owned are gone too: no orphan money
+        # movement may survive the document it described.
+        from models import AccountTransaction
+        assert AccountTransaction.query.filter(AccountTransaction.source_type == 'CashFlowEntry',
+                                              AccountTransaction.source_id.in_([live_id, void_id])
+                                              ).count() == 0
+        # The live row's money effect was reversed on the way out.
+        assert db.session.get(Account, acc_id).balance == 500000.0
+
+
+def test_remove_entries_and_delete_is_not_the_data_error_flash_on_a_grn_party(desk):
+    """A party used only by a GRN charge/payment: readable refusal, never an FK crash.
+
+    ``grn_charge.recipient_party_id`` / ``supplier_payment.recipient_party_id``
+    can point at a ``cash_flow_party`` that no cash-flow entry uses.  Delete used
+    to send the DELETE anyway and the operator got
+    "The operation could not be completed due to a data error."
+    """
+    from models import GRN, GRNCharge, GRNItem, Material, Supplier
+
+    app, web = desk
+    with app.app_context():
+        party = CashFlowParty(name='Pioneer Labour', party_type='labour', is_active=True)
+        supplier = Supplier(name='Cement Co')
+        material = Material(code='CEM', name='Cement', unit='bag')
+        db.session.add_all([party, supplier, material])
+        db.session.flush()
+        grn = GRN(supplier=supplier.name, supplier_id=supplier.id,
+                  auto_bill_no='GRN-9001')
+        db.session.add(grn)
+        db.session.flush()
+        db.session.add(GRNItem(grn_id=grn.id, mat_name=material.name,
+                               qty=10, price_at_time=100))
+        db.session.add(GRNCharge(grn_id=grn.id, label='Loading', amount=500,
+                                 amount_minor=50000, recipient_party_id=party.id,
+                                 recipient_name=party.name))
+        db.session.commit()
+        party_id = party.id
+
+    post_action(web, 'delete_party', party_id=str(party_id))
+    message = last_flash(web)
+    assert 'Cannot delete' in message
+    assert 'GRN charges' in message
+    assert 'data error' not in message.lower()
+    with app.app_context():
+        assert db.session.get(CashFlowParty, party_id) is not None
+
+
+def test_remove_entries_and_delete_empties_a_subcategory(desk):
+    app, web = desk
+    with app.app_context():
+        acc = make_account()
+        cat = make_category('Fuel', direction='out')
+        sub = make_subcategory(cat, 'Diesel')
+        make_entry('out', 700, acc, category=cat, subcategory=sub)
+        cat_id, sub_id, acc_id = cat.id, sub.id, acc.id
+        db.session.commit()
+
+    post_action(web, 'delete_subcategory', subcategory_id=str(sub_id))
+    assert 'Cannot delete' in last_flash(web)
+
+    post_action(web, 'purge_subcategory_entries', subcategory_id=str(sub_id))
+    message = last_flash(web)
+    assert 'Sub-category deleted' in message, message
+    with app.app_context():
+        assert db.session.get(CashFlowSubcategory, sub_id) is None
+        assert db.session.get(CashFlowCategory, cat_id) is not None
+        assert CashFlowEntry.query.count() == 0
+        assert db.session.get(Account, acc_id).balance == 500000.0
+
+
+def test_the_used_category_row_offers_the_emptying_action(desk):
+    """The panel must offer the way forward instead of a dead-end disabled button."""
+    app, web = desk
+    with app.app_context():
+        acc = make_account()
+        cat = make_category('Transport', direction='out')
+        sub = make_subcategory(cat, 'Loader')
+        make_entry('out', 1500, acc, category=cat, subcategory=sub)
+        cat_id = cat.id
+        db.session.commit()
+
+    html = web.get('/cash_flow').get_data(as_text=True)
+    assert 'value="purge_category_entries"' in html
+    assert 'Remove entries &amp; delete' in html
+    assert 'value="purge_subcategory_entries"' in html
+    # One row carries BOTH ids: the panel must report one transaction, not two.
+    from app.services.cash_flow_svc import cf_category_entry_counts
+    with app.app_context():
+        assert cf_category_entry_counts(cat_id) == {'total': 1, 'direct': 1}
+    assert 'remove its 1 transaction(s)' in html
