@@ -749,6 +749,7 @@
                     {% endif %}
                     {% if c.id in (used_category_ids or []) %}
                     <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="Used by historical transactions. Disable instead of deleting.">Delete</button>
+                    <span class="small text-muted align-self-center">In use — disable instead</span>
                     {% else %}
                     <button class="btn btn-sm btn-outline-danger" name="action" value="delete_category" type="submit" onclick="return confirm('Permanently delete this unused category?');">Delete</button>
                     {% endif %}
@@ -787,6 +788,7 @@
                     {% endif %}
                     {% if s.id in (used_subcategory_ids or []) %}
                     <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="Used by historical transactions. Disable instead of deleting.">Delete</button>
+                    <span class="small text-muted align-self-center">In use — disable instead</span>
                     {% else %}
                     <button class="btn btn-sm btn-outline-danger" name="action" value="delete_subcategory" type="submit" onclick="return confirm('Permanently delete this unused sub-category?');">Delete</button>
                     {% endif %}
@@ -831,6 +833,7 @@
                     {% endif %}
                     {% if p.id in (used_party_ids or []) %}
                     <button type="button" class="btn btn-sm btn-outline-secondary" disabled title="Used by historical transactions. Disable instead of deleting.">Delete</button>
+                    <span class="small text-muted align-self-center">In use — disable instead</span>
                     {% else %}
                     <button class="btn btn-sm btn-outline-danger" name="action" value="delete_party" type="submit" onclick="return confirm('Permanently delete this unused party?');">Delete</button>
                     {% endif %}

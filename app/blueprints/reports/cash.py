@@ -47,9 +47,22 @@ from app.services.cash_flow_svc import (
 )
 
 
-def _cf_redirect(**kwargs):
+_CF_MASTER_DATA_ACTIONS = frozenset({
+    'restore_category', 'restore_subcategory', 'restore_party',
+    'add_category', 'add_subcategory', 'add_party',
+    'disable_category', 'disable_subcategory', 'disable_party',
+    'enable_category', 'enable_subcategory', 'enable_party',
+    'update_party', 'rename_category', 'rename_subcategory',
+    'delete_category', 'delete_subcategory', 'delete_party',
+})
+
+
+def _cf_redirect(anchor=None, **kwargs):
     params = {k: v for k, v in kwargs.items() if v not in (None, '')}
-    return redirect(url_for('cash_flow', **params))
+    target = url_for('cash_flow', **params)
+    if anchor:
+        target += f"#{str(anchor).lstrip('#')}"
+    return redirect(target)
 
 
 def _cf_filter_kwargs(source):
@@ -287,7 +300,10 @@ def cash_flow():
         action = request.form.get('action', '').strip()
 
     def _back():
-        return _cf_redirect(**{**filter_kwargs, 'from_date': from_date, 'to_date': to_date})
+        return _cf_redirect(
+            anchor='tab-master' if action in _CF_MASTER_DATA_ACTIONS else None,
+            **{**filter_kwargs, 'from_date': from_date, 'to_date': to_date},
+        )
 
     if request.method == 'POST' and action == 'restore_category':
         # Explicit revive from the Master Data panel.  Kept separate from
