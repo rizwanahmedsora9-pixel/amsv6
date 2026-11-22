@@ -11,6 +11,7 @@ from app.services.cash_flow_svc import (
     CF_SOURCE_LABELS,
     apply_running_balance,
     categories_for_direction,
+    cf_category_entry_counts,
     cf_used_category_ids,
     cf_used_party_ids,
     cf_used_subcategory_ids,
@@ -27,6 +28,7 @@ from app.services.cash_flow_svc import (
     enable_cf_subcategory,
     filter_cash_flow_rows,
     parse_physical_cash_amount,
+    purge_cf_category_entries,
     rename_cf_category,
     rename_cf_subcategory,
     save_cf_category,
@@ -54,6 +56,7 @@ _CF_MASTER_DATA_ACTIONS = frozenset({
     'enable_category', 'enable_subcategory', 'enable_party',
     'update_party', 'rename_category', 'rename_subcategory',
     'delete_category', 'delete_subcategory', 'delete_party',
+    'purge_category_entries', 'purge_subcategory_entries',
 })
 
 
@@ -523,6 +526,35 @@ def cash_flow():
             flash(str(exc), 'danger')
         return _back()
 
+    if request.method == 'POST' and action == 'purge_category_entries':
+        # "Remove entries & delete": empty a category that only carries history
+        # (including rows that were voided, which are kept by design), then
+        # delete the master itself — one operator decision, one transaction.
+        category_id = request.form.get('category_id', type=int)
+        try:
+            result = purge_cf_category_entries(
+                category_id, actor=current_user,
+                reason=request.form.get('purge_reason') or 'Category removed from Master Data',
+            )
+            delete_cf_category(category_id)
+            db.session.commit()
+            audit_log(current_user, 'cash_flow.category.purge_delete',
+                      f'id={category_id} removed={result.get("removed")}')
+            flash(
+                f'Category deleted. {result.get("removed", 0)} transaction(s) were '
+                'removed with it; each one\'s money effect was reversed and the '
+                'removal is recorded in the activity log.',
+                'success',
+            )
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'danger')
+        except Exception as exc:
+            db.session.rollback()
+            logger.exception('Cash flow purge + delete category failed')
+            flash(f'Unable to remove the category entries: {exc}', 'danger')
+        return _back()
+
     if request.method == 'POST' and action == 'delete_category':
         try:
             delete_cf_category(request.form.get('category_id', type=int))
@@ -535,6 +567,38 @@ def cash_flow():
             db.session.rollback()
             logger.exception('Cash flow delete category failed')
             flash(f'Unable to delete category: {exc}', 'danger')
+        return _back()
+
+    if request.method == 'POST' and action == 'purge_subcategory_entries':
+        # Empty one sub-category (reversing each money effect) and delete it.
+        subcategory_id = request.form.get('subcategory_id', type=int)
+        try:
+            from models import CashFlowSubcategory as _CFSub
+
+            sub = db.session.get(_CFSub, subcategory_id) if subcategory_id else None
+            if not sub:
+                raise ValueError('Sub-category not found.')
+            result = purge_cf_category_entries(
+                sub.category_id, actor=current_user,
+                reason=request.form.get('purge_reason') or 'Sub-category removed from Master Data',
+                subcategory_id=sub.id,
+            )
+            delete_cf_subcategory(sub.id)
+            db.session.commit()
+            audit_log(current_user, 'cash_flow.subcategory.purge_delete',
+                      f'id={subcategory_id} removed={result.get("removed")}')
+            flash(
+                f'Sub-category deleted. {result.get("removed", 0)} transaction(s) were '
+                'removed with it; each one\'s money effect was reversed.',
+                'success',
+            )
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'danger')
+        except Exception as exc:
+            db.session.rollback()
+            logger.exception('Cash flow purge + delete subcategory failed')
+            flash(f'Unable to remove the sub-category entries: {exc}', 'danger')
         return _back()
 
     if request.method == 'POST' and action == 'delete_subcategory':
@@ -917,6 +981,7 @@ def cash_flow():
         cf_parties=cf_parties,
         cf_parties_all=cf_parties_all,
         used_category_ids=cf_used_category_ids(),
+        cf_category_counts={c.id: cf_category_entry_counts(c.id) for c in cf_categories},
         used_subcategory_ids=cf_used_subcategory_ids(),
         used_party_ids=cf_used_party_ids(),
         default_movement_datetime=pk_now().strftime('%Y-%m-%dT%H:%M'),
