@@ -155,6 +155,48 @@ def source_materials_for_conversion() -> list:
     return rows
 
 
+def sources_with_open_cement_links() -> list:
+    """Bagged items linked to at least one active Open Cement item.
+
+    This is the set the conversion screen offers in its "Source Cement Item"
+    dropdown.  A bagged item that has no live Open Cement link can never be
+    converted — the destination list would always be empty — so it is not an
+    offerable conversion source.  Only Open Cement items whose category is the
+    reserved "Open Cement" category count as links, and only active ones
+    (matching :func:`linked_open_materials`).
+    """
+    from app.services.lookups import is_service_name
+
+    cat = open_cement_category()
+    if cat is None:
+        return []
+    linked_source_ids = {
+        int(row[0])
+        for row in db.session.query(Material.source_material_id)
+        .filter(
+            Material.category_id == cat.id,
+            Material.is_active == True,  # noqa: E712
+            Material.source_material_id.isnot(None),
+        )
+        .distinct()
+        .all()
+        if row[0] is not None
+    }
+    if not linked_source_ids:
+        return []
+    rows = []
+    for mat in Material.query.filter(
+        Material.is_active == True,  # noqa: E712
+        Material.id.in_(linked_source_ids),
+    ).order_by(Material.name.asc()).all():
+        if is_service_name(mat.name):
+            continue
+        if is_open_cement_material(mat):
+            continue
+        rows.append(mat)
+    return rows
+
+
 def protect_open_cement_category(cat) -> Optional[str]:
     """Return a refusal message when *cat* is the reserved category, else None.
 

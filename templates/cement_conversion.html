@@ -42,10 +42,11 @@
             <label class="ui-label">Source Cement Item *</label>
             <select name="source_material" id="ccSource" class="form-select" required>
               <option value="">-- Select bagged cement item --</option>
-              {% for m in source_materials %}
+              {% for m in conversion_source_materials %}
               <option value="{{ m.id }}" data-unit="{{ m.unit or 'Bags' }}" data-stock="{{ '%.4f'|format(m.total or 0) }}">{{ m.name }}</option>
               {% endfor %}
             </select>
+            <small class="ui-helper">Only bagged items linked to an Open Cement item are listed.</small>
             <small class="ui-helper" id="ccSourceStock"></small>
           </div>
           <div class="ui-field ui-col-2">

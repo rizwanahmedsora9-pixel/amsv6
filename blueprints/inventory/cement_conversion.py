@@ -27,6 +27,7 @@ from app.services.open_cement import (
     is_open_cement_material,
     linked_open_materials,
     source_materials_for_conversion,
+    sources_with_open_cement_links,
 )
 from app.services.time_money import pk_now
 
@@ -93,7 +94,10 @@ def cement_conversion():
         page=f['page'],
         per_page=f['per_page'],
     )
+    # History filter keeps every eligible bagged source; the "Source Cement
+    # Item" dropdown is restricted to the ones linked to an Open Cement item.
     source_materials = source_materials_for_conversion()
+    conversion_source_materials = sources_with_open_cement_links()
     # All open-cement items, each carrying its explicit source link.
     from app.services.open_cement import open_cement_materials
     open_items = open_cement_materials()
@@ -101,6 +105,7 @@ def cement_conversion():
         'cement_conversion.html',
         filters=f,
         source_materials=source_materials,
+        conversion_source_materials=conversion_source_materials,
         open_items=open_items,
         history=history,
         default_bag_weight=DEFAULT_BAG_WEIGHT_KG,

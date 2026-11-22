@@ -1266,3 +1266,114 @@ def test_d_edit_modal_offers_keg_helper_for_saved_open_cement_sale(world):
     assert f'data-open-cement="1"' in html
     page = web.get('/direct_sales').get_data(as_text=True)
     assert f'OPEN_CEMENT_MATERIAL_NAMES = ["{data["open_name"]}"]' in page
+
+
+# --------------------------------------------------------------------------- #
+# L. "Source Cement Item" only lists bagged items linked to an Open Cement item
+# --------------------------------------------------------------------------- #
+def _form_source_options(html):
+    """Extract the (value, text) pairs of the New Conversion source dropdown."""
+    import re
+    match = re.search(r'id="ccSource".*?</select>', html, re.DOTALL)
+    assert match, 'Source Cement Item select was not rendered'
+    return re.findall(r'<option value="([^"]*)"[^>]*>(.*?)</option>', match.group(0), re.DOTALL)
+
+
+def _add_unlinked_bagged_item(app, name='Unlinked Bags', code='BG-UNLINKED'):
+    with app.app_context():
+        item = Material(name=name, code=code, unit='Bags', total=5)
+        db.session.add(item)
+        db.session.commit()
+        return item.id
+
+
+def test_l_source_dropdown_lists_only_linked_bagged_items(world):
+    data = _make_world(world, bags=10, rate=1400.0)
+    unlinked_id = _add_unlinked_bagged_item(world)
+    web = world.test_client()
+    _login(web)
+    html = web.get('/inventory/cement_conversion').get_data(as_text=True)
+    values = {value for value, _ in _form_source_options(html)}
+    texts = {text.strip() for _, text in _form_source_options(html)}
+    assert str(data['bag_id']) in values
+    assert data['bag_name'] in texts
+    assert str(unlinked_id) not in values
+    assert 'Unlinked Bags' not in texts
+
+
+def test_l_source_dropdown_drops_source_when_open_cement_link_is_inactive(world):
+    data = _make_world(world, bags=10, rate=1400.0)
+    with world.app_context():
+        open_mat = db.session.get(Material, data['open_id'])
+        open_mat.is_active = False
+        db.session.commit()
+    web = world.test_client()
+    _login(web)
+    html = web.get('/inventory/cement_conversion').get_data(as_text=True)
+    values = {value for value, _ in _form_source_options(html)}
+    assert str(data['bag_id']) not in values
+
+
+def test_l_source_dropdown_drops_inactive_source_item(world):
+    data = _make_world(world, bags=10, rate=1400.0)
+    with world.app_context():
+        bag = db.session.get(Material, data['bag_id'])
+        bag.is_active = False
+        db.session.commit()
+    web = world.test_client()
+    _login(web)
+    html = web.get('/inventory/cement_conversion').get_data(as_text=True)
+    values = {value for value, _ in _form_source_options(html)}
+    assert str(data['bag_id']) not in values
+
+
+def test_l_non_open_cement_row_link_does_not_count(world):
+    data = _make_world(world, bags=10, rate=1400.0)
+    # Deactivate the real Open Cement link so a bogus link is the only remaining one.
+    with world.app_context():
+        open_mat = db.session.get(Material, data['open_id'])
+        open_mat.is_active = False
+        bogus = Material(name='Not Open Cement', code='NOT-OPEN', unit='Bags',
+                         total=0, source_material_id=data['bag_id'])
+        db.session.add(bogus)
+        db.session.commit()
+    web = world.test_client()
+    _login(web)
+    html = web.get('/inventory/cement_conversion').get_data(as_text=True)
+    values = {value for value, _ in _form_source_options(html)}
+    assert str(data['bag_id']) not in values
+
+
+def test_l_history_filter_keeps_all_bagged_sources(world):
+    """The history filter must not be restricted: old conversions can still
+    be filtered by a source that is no longer linked."""
+    _add_unlinked_bagged_item(world)
+    web = world.test_client()
+    _login(web)
+    html = web.get('/inventory/cement_conversion').get_data(as_text=True)
+    assert 'Unlinked Bags' in html
+
+
+def test_l_materials_form_link_dropdown_still_lists_unlinked_bagged_items(world):
+    """The Material Brands 'Linked Bagged Cement Item' list must stay open so
+    an Open Cement item can be linked to a source that has no link yet."""
+    _add_unlinked_bagged_item(world)
+    web = world.test_client()
+    _login(web)
+    html = web.get('/materials').get_data(as_text=True)
+    assert 'Unlinked Bags' in html
+
+
+def test_l_service_items_are_never_conversion_sources(world):
+    data = _make_world(world, bags=10, rate=1400.0)
+    with world.app_context():
+        service = Material(name='Rent Cement Yard', code='RENT-CEM', unit='Pcs', total=0)
+        db.session.add(service)
+        db.session.commit()
+    web = world.test_client()
+    _login(web)
+    html = web.get('/inventory/cement_conversion').get_data(as_text=True)
+    values = {value for value, _ in _form_source_options(html)}
+    texts = {text.strip() for _, text in _form_source_options(html)}
+    assert 'Rent Cement Yard' not in texts
+    assert str(data['bag_id']) in values
