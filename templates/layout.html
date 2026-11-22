@@ -815,15 +815,20 @@ function toggleNavGroup(groupId, btn) {
         // Reduced from 120s to 30s — users should not wait 2 minutes for a stuck overlay
         loadingWatchTimer = setTimeout(hideLoading, 30000);
     }
-    function lockForm(form, lock) {
+    function lockForm(form, lock, submitter) {
         // Immediate visual + behavioural submit lock: disable submit controls so
         // a second click cannot fire another request, and re-enable them when the
         // flow ends (validation failure / navigation interrupted).  The
         // __formSubmitting latch below is the authoritative second guard.
+        // Keep the clicked submitter enabled until the browser serializes the
+        // form: disabled controls are omitted from the POST, and many forms use
+        // that button's name/value (for example action=delete_category) to pick
+        // the operation.  The latch prevents that enabled button from sending a
+        // second request while navigation is in progress.
         if (!form) return;
         form.classList.toggle('ams-submitting', !!lock);
         form.querySelectorAll('button[type="submit"], input[type="submit"]').forEach(function (btn) {
-            btn.disabled = !!lock;
+            btn.disabled = !!lock && btn !== submitter;
         });
     }
     function unlockAllForms() {
@@ -1667,12 +1672,12 @@ function toggleNavGroup(groupId, btn) {
                     sessionStorage.setItem('pending_save_context', JSON.stringify(saveCtx));
                     sessionStorage.setItem('pending_save_feedback', '1');
                     __formSubmitting = true;
-                    lockForm(form, true);  // disable Save immediately
+                    lockForm(form, true, submitter);  // keep the clicked control successful for the POST
                     startTaskProgress('Saving', 'Saving transaction...');
                     return;
                 }
                 __formSubmitting = true;
-                lockForm(form, true);
+                lockForm(form, true, submitter);
                 showLoading();
                 return;
             }

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import html as html_module
+from pathlib import Path
 
 from flask import template_rendered
 from sqlalchemy import event
@@ -667,6 +668,7 @@ def test_the_page_offers_delete_only_for_unused_categories(desk):
         row = html.split(f'name="category_id" value="{cat_id}"', 1)[1].split('</tr>', 1)[0]
         assert 'value="delete_category"' not in row
         assert 'Disable instead of deleting' in row
+        assert 'In use — disable instead' in row
     row = html.split(f'name="category_id" value="{free_id}"', 1)[1].split('</tr>', 1)[0]
     assert 'value="delete_category"' in row
 
@@ -984,6 +986,34 @@ def test_page_renders_master_panel_with_expected_controls(desk):
                    'value="rename_category"', 'value="disable_category"',
                    'value="add_category"'):
         assert needle in html
+
+
+def test_shared_submit_lock_keeps_clicked_action_button_enabled():
+    """Disabling the clicked button drops its name/value from a browser POST."""
+    layout = (Path(__file__).resolve().parents[1] / 'templates' / 'layout.html').read_text()
+    assert 'function lockForm(form, lock, submitter)' in layout
+    assert 'const submitter = e.submitter || document.activeElement;' in layout
+    assert 'btn.disabled = !!lock && btn !== submitter;' in layout
+    assert layout.count('lockForm(form, true, submitter)') >= 2
+
+
+def test_master_data_actions_redirect_back_to_the_master_panel(desk):
+    app, web = desk
+    with app.app_context():
+        category = make_category('Shop Rent', direction='out')
+        category_id = category.id
+        db.session.commit()
+
+    response = web.post('/cash_flow', data={
+        'action': 'rename_category',
+        'category_id': str(category_id),
+        'category_name': 'Office Rent',
+        'category_direction': 'out',
+    }, follow_redirects=True)
+    assert response.status_code == 200
+    assert response.history
+    assert response.history[0].headers['Location'].endswith('#tab-master')
+    assert 'Category updated. Historical rows stay linked to the same category.' in response.get_data(as_text=True)
 
 
 def test_names_are_html_escaped_on_the_page(desk):
