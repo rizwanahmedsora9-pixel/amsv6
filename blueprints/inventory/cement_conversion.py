@@ -25,9 +25,28 @@ from app.services.open_cement import (
     DEFAULT_BAG_WEIGHT_KG,
     ensure_open_cement_category,
     is_open_cement_material,
+    linked_open_materials,
     source_materials_for_conversion,
 )
 from app.services.time_money import pk_now
+
+
+def _linked_open_payload(source_mat) -> list:
+    """Serialise the Open Cement items linked to *source_mat*.
+
+    Used by both the dedicated linked-items endpoint and the cost preview so
+    the destination dropdown can never be blocked by an unrelated validation
+    error (empty quantity, no stock, missing cost layer).
+    """
+    return [
+        {
+            'id': m.id,
+            'name': m.name,
+            'unit': m.unit or 'KG',
+            'stock': round(float(m.total or 0.0), 4),
+        }
+        for m in linked_open_materials(source_mat)
+    ]
 
 
 def _resolve_material_input(value):
@@ -134,6 +153,23 @@ def cement_conversion_export():
     )
 
 
+@inventory_bp.route('/cement_conversion/linked_open')
+@login_required
+def cement_conversion_linked_open():
+    """List the Open Cement items linked to a source cement item.
+
+    Deliberately separate from the cost preview: the destination dropdown must
+    populate as soon as a source is picked, before the operator types a
+    quantity, and it must keep working when the preview itself is invalid.
+    """
+    source = _resolve_material_input(request.args.get('source') or '')
+    if source is None:
+        return jsonify({'ok': False, 'error': 'Source material not found', 'linked_open': []}), 404
+    if is_open_cement_material(source):
+        return jsonify({'ok': False, 'error': 'Open Cement items cannot be a conversion source', 'linked_open': []}), 400
+    return jsonify({'ok': True, 'linked_open': _linked_open_payload(source)})
+
+
 @inventory_bp.route('/cement_conversion/preview')
 @login_required
 def cement_conversion_preview():
@@ -142,6 +178,9 @@ def cement_conversion_preview():
         return jsonify({'ok': False, 'error': 'Source material not found'}), 404
     if is_open_cement_material(source):
         return jsonify({'ok': False, 'error': 'Open Cement items cannot be a conversion source'}), 400
+    # The linked list is independent of the quantity/stock validation below,
+    # so build it first and return it even when the preview is refused.
+    linked = _linked_open_payload(source)
     try:
         preview = preview_conversion(
             source,
@@ -150,11 +189,7 @@ def cement_conversion_preview():
             request.args.get('weight_per_bag', type=float),
         )
     except ValueError as exc:
-        return jsonify({'ok': False, 'error': str(exc)}), 400
-    linked = [
-        {'id': m.id, 'name': m.name, 'unit': m.unit or 'KG', 'stock': round(float(m.total or 0.0), 4)}
-        for m in linked_open_materials(source)
-    ]
+        return jsonify({'ok': False, 'error': str(exc), 'linked_open': linked}), 400
     return jsonify({
         'ok': True,
         'source': source.name,
