@@ -68,6 +68,7 @@
               'font-weight:800;font-size:.78rem;background:#fff;color:#7f1d1d;cursor:pointer;">' +
               '🔊 Enable siren</button>';
         document.body.appendChild(banner);
+        document.dispatchEvent(new CustomEvent('tasker:alarm-banner', { detail: { active: true } }));
         bannerText = banner.querySelector('#amsTaskerAlarmText');
         soundBtn = banner.querySelector('#amsTaskerSoundBtn');
         soundBtn.addEventListener('click', function (e) {
@@ -104,6 +105,7 @@
         banner = null;
         bannerText = null;
         soundBtn = null;
+        document.dispatchEvent(new CustomEvent('tasker:alarm-banner', { detail: { active: false } }));
     }
 
     function alarmText(data) {

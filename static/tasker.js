@@ -505,6 +505,12 @@
             });
         }
 
+        // The global alarm widget owns the fixed red banner; hide the inline
+        // bar while it is showing so the message is not duplicated.
+        document.addEventListener('tasker:alarm-banner', function (e) {
+            if (e.detail && e.detail.active) $('tkAlarmBar').style.display = 'none';
+        });
+
         // sound unlock (browsers require a click before Web Audio can play)
         var soundBtn = $('tkSoundBtn');
         if (soundBtn) {
