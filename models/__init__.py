@@ -14,6 +14,7 @@ from .imports import *  # noqa
 from .migration import *  # noqa
 from .events import *  # noqa
 from .sidebar import *  # noqa
+from .tasker import *  # noqa
 
 import sys as _sys
 from types import ModuleType as _ModuleType

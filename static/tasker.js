@@ -1,0 +1,533 @@
+/* Tasker board — isolated tracking page.
+ *
+ * Talks ONLY to /tasker/api/*.  No other AMS module is read or written.
+ * Alarm: looping Web Audio beep while any deadline is overdue; it stops only
+ * when an admin resets the missed deadline (or the board reports none).
+ */
+(function () {
+    'use strict';
+    window.TASKER_PAGE_ACTIVE = true;
+
+    var board = { counters: {}, tasks: [], is_admin: false };
+    var filter = 'all';
+    var searchQ = '';
+    var expanded = {};
+    var pollTimer = null;
+    var tickTimer = null;
+
+    // ------------------------------------------------------------------ dom
+    function $(id) { return document.getElementById(id); }
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+    }
+
+    // ---------------------------------------------------------------- sound
+    var alarmTimer = null;
+    function beep() {
+        try {
+            var Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            if (!beep.ctx) beep.ctx = new Ctx();
+            var ctx = beep.ctx;
+            if (ctx.state === 'suspended') ctx.resume();
+            var o = ctx.createOscillator(), g = ctx.createGain();
+            o.type = 'square'; o.frequency.value = 880;
+            o.connect(g); g.connect(ctx.destination);
+            var t = ctx.currentTime;
+            g.gain.setValueAtTime(0.10, t);
+            g.gain.setValueAtTime(0, t + 0.12);
+            g.gain.setValueAtTime(0.10, t + 0.20);
+            g.gain.setValueAtTime(0, t + 0.32);
+            o.start(t); o.stop(t + 0.35);
+        } catch (e) { /* audio unavailable — red UI still alerts */ }
+    }
+    function alarmStart() {
+        if (alarmTimer) return;
+        beep();
+        alarmTimer = setInterval(beep, 2500);
+    }
+    function alarmStop() {
+        if (alarmTimer) { clearInterval(alarmTimer); alarmTimer = null; }
+    }
+    // Browsers block audio until the first interaction — retry politely.
+    ['pointerdown', 'keydown'].forEach(function (ev) {
+        document.addEventListener(ev, function once() {
+            if (beep.ctx && beep.ctx.state === 'suspended') beep.ctx.resume();
+            if (alarmTimer) { beep(); }
+        }, { once: false, passive: true });
+    });
+
+    // ------------------------------------------------------------- countdown
+    function fmtDelta(ms) {
+        var neg = ms < 0; ms = Math.abs(ms);
+        var m = Math.floor(ms / 60000);
+        var d = Math.floor(m / 1440); m -= d * 1440;
+        var h = Math.floor(m / 60); m -= h * 60;
+        var s = Math.floor((ms % 60000) / 1000);
+        var out = d > 0 ? (d + 'd ' + h + 'h') : (h > 0 ? (h + 'h ' + m + 'm') : (m + 'm ' + s + 's'));
+        return neg ? ('+' + out + ' OVERDUE') : ('− ' + out);
+    }
+    function tick() {
+        var now = Date.now();
+        document.querySelectorAll('.tk-count[data-dl]').forEach(function (el) {
+            var dl = Date.parse(el.getAttribute('data-dl'));
+            if (isNaN(dl)) { el.textContent = '—'; return; }
+            var txt = fmtDelta(dl - now);
+            el.textContent = txt;
+            el.classList.toggle('tk-count-danger', dl < now);
+            el.classList.toggle('tk-count-warn', dl >= now && (dl - now) < 30 * 60000);
+        });
+    }
+
+    // ----------------------------------------------------------------- api
+    function api(url, opts) {
+        opts = opts || {};
+        if (opts.body) {
+            opts.headers = { 'Content-Type': 'application/json' };
+            opts.body = JSON.stringify(opts.body);
+        }
+        return fetch(url, opts).then(function (r) {
+            if (r.status === 403) return r.json().then(function (j) { throw new Error(j.error || 'Not allowed'); });
+            return r.json();
+        });
+    }
+
+    // --------------------------------------------------------------- board
+    function statusChip(t) {
+        var chips = '<span class="tk-chip tk-chip-' + esc(t.status) + '">' + esc(t.status) + '</span> ';
+        if (t.note_overdue) chips += '<span class="tk-chip tk-chip-OVERDUE">NOTE LATE</span> ';
+        if (t.delivery_overdue) chips += '<span class="tk-chip tk-chip-OVERDUE">DELIVERY LATE</span>';
+        return chips;
+    }
+    function itemsSummary(t) {
+        var items = t.items || [];
+        if (!items.length) return '—';
+        var first = items[0];
+        var txt = esc(first.material_name) + ' ×' + esc(first.qty) + ' ' + esc(first.unit || '');
+        if (first.warranty) txt += ' <span class="text-secondary">(wty: ' + esc(first.warranty) + ')</span>';
+        if (items.length > 1) {
+            txt += ' <span class="tk-link tk-detail-toggle" data-id="' + t.id + '">+' + (items.length - 1) + ' more</span>';
+        }
+        return txt;
+    }
+    function lastAction(t) {
+        var s = t.stamps || {};
+        var order = [
+            ['delivered_at', 'Delivered', s.delivered_by],
+            ['dispatched_at', 'Dispatched', s.dispatched_by],
+            ['loaded_at', 'Loaded', s.loaded_by],
+            ['noted_at', 'Noted', s.noted_by],
+        ];
+        for (var i = 0; i < order.length; i++) {
+            if (order[i][0] && s[order[i][0]]) {
+                return order[i][1] + ' by ' + esc(order[i][2] || '?') +
+                    '<div class="text-secondary" style="font-size:.72rem;">' + esc(String(s[order[i][0]]).replace('T', ' ')) + '</div>';
+            }
+        }
+        return '<span class="text-secondary">created by ' + esc(t.created_by || '?') + '</span>' +
+            '<div class="text-secondary" style="font-size:.72rem;">' + esc(String(t.created_at || '').replace('T', ' ')) + '</div>';
+    }
+    function actionButtons(t) {
+        var btns = [];
+        var next = { NEW: ['noted', 'Noted', 'btn-info'], NOTED: ['loaded', 'Loaded', 'btn-warning'],
+                     LOADED: ['dispatched', 'Dispatched', 'btn-primary'], DISPATCHED: ['delivered', 'Delivered', 'btn-success'] }[t.status];
+        if (next) {
+            btns.push('<button class="btn btn-sm ' + next[2] + ' fw-bold tk-act" data-id="' + t.id +
+                '" data-action="' + next[0] + '">' + next[1] + '</button>');
+        }
+        if (board.is_admin) {
+            btns.push('<button class="btn btn-sm btn-outline-warning tk-reset" data-id="' + t.id + '">Reset time</button>');
+            if (t.status !== 'CANCELLED' && t.status !== 'DELIVERED') {
+                btns.push('<button class="btn btn-sm btn-outline-danger tk-act" data-id="' + t.id + '" data-action="cancel">Cancel</button>');
+            }
+            if (t.status === 'CANCELLED') {
+                btns.push('<button class="btn btn-sm btn-outline-success tk-act" data-id="' + t.id + '" data-action="reopen">Reopen</button>');
+            }
+        }
+        btns.push('<button class="btn btn-sm btn-outline-light tk-detail-toggle" data-id="' + t.id + '">Detail</button>');
+        return btns.join(' ');
+    }
+    function detailRow(t) {
+        var items = (t.items || []).map(function (it, i) {
+            return '<tr><td>' + (i + 1) + '</td><td>' + esc(it.material_name) +
+                (it.material_code ? ' <span class="text-secondary">(' + esc(it.material_code) + ')</span>' : '') +
+                '</td><td class="tk-item-qty">' + esc(it.qty) + ' ' + esc(it.unit || '') + '</td><td>' +
+                esc(it.warranty || '—') + '</td><td>' + esc(it.note || '') + '</td></tr>';
+        }).join('');
+        var events = (t.events || []).slice().reverse().map(function (e) {
+            return '<div class="tk-timeline-item"><strong>' + esc(e.event) + '</strong> — ' +
+                esc(e.by_user || 'system') + ' <span class="text-secondary">· ' + esc(String(e.at || '').replace('T', ' ')) + '</span>' +
+                (e.detail ? '<div class="text-secondary">' + esc(e.detail) + '</div>' : '') + '</div>';
+        }).join('');
+        var resets = (t.deadline_resets || []).map(function (r) {
+            return '<div style="font-size:.78rem;">' + esc(r.kind) + ': ' + esc(String(r.old_deadline || '—').replace('T', ' ')) +
+                ' → ' + esc(String(r.new_deadline || 'cleared').replace('T', ' ')) + ' by ' + esc(r.by_user || '?') +
+                (r.reason ? ' (' + esc(r.reason) + ')' : '') + '</div>';
+        }).join('');
+        return '<tr class="tk-detail-row" data-for="' + t.id + '"><td colspan="8"><div class="tk-detail-box">' +
+            '<div class="row g-3"><div class="col-md-6">' +
+            '<div class="fw-bold mb-1">Items</div><table class="table table-dark table-sm mb-0"><thead><tr><th>#</th><th>Material / brand</th><th>Qty</th><th>Warranty</th><th>Note</th></tr></thead><tbody>' +
+            items + '</tbody></table>' +
+            (t.task_note ? '<div class="mt-2 text-secondary" style="font-size:.82rem;"><i class="bi bi-sticky me-1"></i>' + esc(t.task_note) + '</div>' : '') +
+            (resets ? '<div class="mt-2"><div class="fw-bold" style="font-size:.82rem;">Deadline resets (admin)</div>' + resets + '</div>' : '') +
+            '</div><div class="col-md-6"><div class="fw-bold mb-1">Timeline</div><div class="tk-timeline">' + (events || '—') + '</div></div>' +
+            '</div></div></td></tr>';
+    }
+
+    function render() {
+        var c = board.counters || {};
+        $('tkcTotal').textContent = c.total || 0;
+        $('tkcNew').textContent = c.new || 0;
+        $('tkcProgress').textContent = (c.noted || 0) + (c.loaded || 0) + (c.dispatched || 0);
+        $('tkcDelivered').textContent = c.delivered || 0;
+        $('tkcOverdue').textContent = c.overdue || 0;
+
+        if (c.overdue > 0) {
+            $('tkAlarmBar').style.display = 'flex';
+            $('tkAlarmText').textContent = c.overdue + ' task deadline(s) missed';
+            alarmStart();
+        } else {
+            $('tkAlarmBar').style.display = 'none';
+            alarmStop();
+        }
+        $('tkNewTaskBtn').style.display = board.is_admin ? '' : 'none';
+
+        var body = $('tkBoardBody');
+        if (!board.tasks.length) {
+            body.innerHTML = '<tr><td colspan="8" class="text-center text-secondary py-4">No tasks' +
+                (filter !== 'all' || searchQ ? ' match this filter.' : ' yet.') + '</td></tr>';
+            return;
+        }
+        body.innerHTML = board.tasks.map(function (t) {
+            var overdue = t.note_overdue || t.delivery_overdue;
+            var row = '<tr class="' + (overdue ? 'tk-row-overdue' : '') + '" data-row="' + t.id + '">' +
+                '<td><span class="fw-bold tk-link tk-detail-toggle" data-id="' + t.id + '">' + esc(t.task_no) + '</span>' +
+                '<div class="text-secondary" style="font-size:.72rem;">#' + esc(t.id) + ' · resets: ' + esc(t.deadline_reset_count || 0) + '</div></td>' +
+                '<td><div class="fw-semibold">' + esc(t.client_name) + '</div>' +
+                (t.client_code ? '<div class="text-secondary" style="font-size:.74rem;">' + esc(t.client_code) + '</div>' : '') + '</td>' +
+                '<td style="max-width:240px;">' + itemsSummary(t) + '</td>' +
+                '<td>' + (t.note_deadline_at
+                    ? '<span class="tk-count" data-dl="' + esc(t.note_deadline_at) + '"></span>'
+                    : '<span class="text-secondary">—</span>') +
+                (t.note_overdue ? ' <i class="bi bi-bell-fill text-danger"></i>' : '') + '</td>' +
+                '<td>' + (t.delivery_deadline_at
+                    ? '<span class="tk-count" data-dl="' + esc(t.delivery_deadline_at) + '"></span>'
+                    : '<span class="text-secondary">—</span>') +
+                (t.delivery_overdue ? ' <i class="bi bi-bell-fill text-danger"></i>' : '') + '</td>' +
+                '<td>' + statusChip(t) + '</td>' +
+                '<td style="font-size:.8rem;">' + lastAction(t) + '</td>' +
+                '<td class="text-end text-nowrap">' + actionButtons(t) + '</td></tr>';
+            if (expanded[t.id]) row += detailRow(t);
+            return row;
+        }).join('');
+        tick();
+    }
+
+    function loadBoard() {
+        var url = '/tasker/api/board?filter=' + encodeURIComponent(filter) +
+            (searchQ ? '&q=' + encodeURIComponent(searchQ) : '');
+        api(url).then(function (data) {
+            board = data;
+            render();
+            // refresh open detail rows
+            Object.keys(expanded).forEach(function (id) {
+                if (expanded[id]) loadDetail(id, true);
+            });
+        }).catch(function () { /* transient — next poll retries */ });
+    }
+
+    function loadDetail(id, keepOpen) {
+        api('/tasker/api/tasks/' + id).then(function (t) {
+            expanded[id] = true;
+            // replace the task in board with full data for rendering detail
+            for (var i = 0; i < board.tasks.length; i++) {
+                if (String(board.tasks[i].id) === String(id)) { board.tasks[i] = t; break; }
+            }
+            if (keepOpen) {
+                var existing = document.querySelector('.tk-detail-row[data-for="' + id + '"]');
+                if (existing) existing.outerHTML = detailRow(t);
+            } else {
+                render();
+            }
+        }).catch(function () {});
+    }
+
+    // ------------------------------------------------------------- combo box
+    function makeCombo(input, list, url, onPick, renderRow) {
+        var active = -1, items = [], timer = null;
+        function hide() { list.style.display = 'none'; active = -1; }
+        function show() {
+            if (!items.length) { hide(); return; }
+            list.innerHTML = items.map(function (it, i) {
+                return '<div class="tk-combo-item' + (i === active ? ' tk-active' : '') + '" data-i="' + i + '">' +
+                    renderRow(it) + '</div>';
+            }).join('');
+            list.style.display = 'block';
+        }
+        function fetchList() {
+            var q = input.value.trim();
+            api(url + '?q=' + encodeURIComponent(q)).then(function (rows) {
+                items = rows || []; active = items.length ? 0 : -1; show();
+            }).catch(function () { items = []; show(); });
+        }
+        input.addEventListener('input', function () {
+            clearTimeout(timer); timer = setTimeout(fetchList, 220);
+        });
+        input.addEventListener('focus', fetchList);
+        input.addEventListener('keydown', function (e) {
+            if (list.style.display === 'none') { if (e.key === 'ArrowDown') fetchList(); return; }
+            if (e.key === 'ArrowDown') { active = Math.min(active + 1, items.length - 1); show(); e.preventDefault(); }
+            else if (e.key === 'ArrowUp') { active = Math.max(active - 1, 0); show(); e.preventDefault(); }
+            else if (e.key === 'Enter') {
+                if (active >= 0 && items[active]) { onPick(items[active]); hide(); e.preventDefault(); }
+            } else if (e.key === 'Escape') { hide(); }
+        });
+        list.addEventListener('mousedown', function (e) {
+            var el = e.target.closest('.tk-combo-item');
+            if (!el) return;
+            var it = items[parseInt(el.getAttribute('data-i'), 10)];
+            if (it) { onPick(it); hide(); }
+            e.preventDefault();
+        });
+        input.addEventListener('blur', function () { setTimeout(hide, 150); });
+    }
+
+    // ---------------------------------------------------------- new task modal
+    var selectedClient = null;
+    var itemSeq = 0;
+
+    function localInputValue(d) {
+        var pad = function (n) { return String(n).padStart(2, '0'); };
+        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+            'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+
+    function addItemRow() {
+        itemSeq += 1;
+        var div = document.createElement('div');
+        div.className = 'row g-2 align-items-end tk-item-row mb-2';
+        div.innerHTML =
+            '<div class="col-md-4 tk-combo-wrap">' +
+            '  <input class="form-control tk-item-name" autocomplete="off" placeholder="Material / brand…" data-row="' + itemSeq + '">' +
+            '  <div class="tk-combo-list"></div>' +
+            '</div>' +
+            '<div class="col-4 col-md-2"><input type="number" step="any" min="0" class="form-control tk-item-qty-in" placeholder="Qty" value=""></div>' +
+            '<div class="col-4 col-md-2"><input class="form-control tk-item-unit" placeholder="Unit"></div>' +
+            '<div class="col-4 col-md-2"><input class="form-control tk-item-wty" placeholder="Warranty"></div>' +
+            '<div class="col-4 col-md-1"><input class="form-control tk-item-note" placeholder="Note"></div>' +
+            '<div class="col-4 col-md-1"><button type="button" class="btn btn-sm btn-outline-danger tk-item-remove w-100"><i class="bi bi-x-lg"></i></button></div>';
+        $('tkItemRows').appendChild(div);
+        var nameInput = div.querySelector('.tk-item-name');
+        var list = div.querySelector('.tk-combo-list');
+        makeCombo(nameInput, list, '/tasker/api/materials/search', function (m) {
+            nameInput.value = m.name;
+            nameInput.dataset.ref = m.id;
+            nameInput.dataset.code = m.code || '';
+            var unitEl = div.querySelector('.tk-item-unit');
+            if (!unitEl.value && m.unit) unitEl.value = m.unit;
+        }, function (m) {
+            return esc(m.name) + '<span class="tk-combo-code">' + esc(m.code || '') + ' · ' + esc(m.unit || '') + '</span>';
+        });
+        div.querySelector('.tk-item-remove').addEventListener('click', function () {
+            div.remove();
+        });
+    }
+
+    function collectItems() {
+        var rows = document.querySelectorAll('.tk-item-row');
+        var out = [];
+        rows.forEach(function (row) {
+            var nameEl = row.querySelector('.tk-item-name');
+            var name = nameEl.value.trim();
+            if (!name) return;
+            out.push({
+                material_ref_id: nameEl.dataset.ref ? parseInt(nameEl.dataset.ref, 10) : null,
+                material_code: nameEl.dataset.code || '',
+                material_name: name,
+                qty: parseFloat(row.querySelector('.tk-item-qty-in').value || '0') || 0,
+                unit: row.querySelector('.tk-item-unit').value.trim(),
+                warranty: row.querySelector('.tk-item-wty').value.trim(),
+                note: row.querySelector('.tk-item-note').value.trim(),
+            });
+        });
+        return out;
+    }
+
+    function showError(id, msg) {
+        var el = $(id);
+        el.textContent = msg || '';
+        el.style.display = msg ? 'block' : 'none';
+    }
+
+    // ------------------------------------------------------------- wiring
+    document.addEventListener('DOMContentLoaded', function () {
+        // filters
+        document.querySelectorAll('.tk-filter-btn').forEach(function (b) {
+            b.addEventListener('click', function () {
+                document.querySelectorAll('.tk-filter-btn').forEach(function (x) { x.classList.remove('active'); });
+                b.classList.add('active');
+                filter = b.getAttribute('data-filter');
+                loadBoard();
+            });
+        });
+        var searchTimer = null;
+        $('tkSearch').addEventListener('input', function (e) {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(function () { searchQ = e.target.value.trim(); loadBoard(); }, 300);
+        });
+
+        // board actions (delegated)
+        $('tkBoardBody').addEventListener('click', function (e) {
+            var act = e.target.closest('.tk-act');
+            if (act) {
+                var id = act.getAttribute('data-id');
+                var action = act.getAttribute('data-action');
+                var note = '';
+                if (action === 'delivered') {
+                    note = window.prompt('Delivery confirmation note (optional):') || '';
+                } else if (action === 'cancel') {
+                    if (!window.prompt('Type YES to cancel this task (reason next):')) return;
+                    note = window.prompt('Cancel reason (optional):') || '';
+                }
+                act.disabled = true;
+                api('/tasker/api/tasks/' + id + '/action', { method: 'POST', body: { action: action, note: note } })
+                    .then(function () { loadBoard(); })
+                    .catch(function (err) { alert(err.message || 'Action failed'); act.disabled = false; });
+                return;
+            }
+            var rst = e.target.closest('.tk-reset');
+            if (rst) {
+                openReset(rst.getAttribute('data-id'));
+                return;
+            }
+            var det = e.target.closest('.tk-detail-toggle');
+            if (det) {
+                var did = det.getAttribute('data-id');
+                if (expanded[did]) {
+                    expanded[did] = false;
+                    var row = document.querySelector('.tk-detail-row[data-for="' + did + '"]');
+                    if (row) row.remove();
+                } else {
+                    loadDetail(did, false);
+                }
+            }
+        });
+
+        // new task modal
+        $('tkNewTaskBtn').addEventListener('click', function () {
+            selectedClient = null;
+            $('tkClientInput').value = '';
+            $('tkClientHint').textContent = 'Start typing to search…';
+            $('tkItemRows').innerHTML = '';
+            addItemRow();
+            var now = new Date();
+            $('tkNoteDeadline').value = localInputValue(new Date(now.getTime() + 30 * 60000));
+            $('tkDeliveryDeadline').value = localInputValue(new Date(now.getTime() + 4 * 3600000));
+            $('tkTaskNote').value = '';
+            showError('tkCreateError', '');
+            new bootstrap.Modal($('tkNewModal')).show();
+        });
+        makeCombo($('tkClientInput'), $('tkClientList'), '/tasker/api/clients/search', function (c) {
+            selectedClient = c;
+            $('tkClientInput').value = c.name;
+            $('tkClientHint').innerHTML = '<i class="bi bi-check-circle-fill text-success"></i> Selected: ' +
+                esc(c.name) + (c.code ? ' (' + esc(c.code) + ')' : '');
+        }, function (c) {
+            return esc(c.name) + '<span class="tk-combo-code">' + esc(c.code || '') + '</span>';
+        });
+        $('tkAddItem').addEventListener('click', addItemRow);
+
+        document.querySelectorAll('.tk-quick-chip').forEach(function (chip) {
+            chip.addEventListener('click', function () {
+                var d = new Date();
+                if (chip.dataset.min) d = new Date(d.getTime() + parseInt(chip.dataset.min, 10) * 60000);
+                else if (chip.dataset.eod) d.setHours(20, 0, 0, 0);
+                else if (chip.dataset.tomorrow) { d.setDate(d.getDate() + 1); d.setHours(10, 0, 0, 0); }
+                var target = chip.dataset.kind === 'note' ? $('tkNoteDeadline') : $('tkDeliveryDeadline');
+                target.value = localInputValue(d);
+            });
+        });
+
+        $('tkCreateSave').addEventListener('click', function () {
+            showError('tkCreateError', '');
+            if (!selectedClient) { showError('tkCreateError', 'Please pick a client from the search list.'); return; }
+            var items = collectItems();
+            if (!items.length) { showError('tkCreateError', 'Add at least one item.'); return; }
+            if (!$('tkNoteDeadline').value || !$('tkDeliveryDeadline').value) {
+                showError('tkCreateError', 'Both deadlines are required.'); return;
+            }
+            var btn = this; btn.disabled = true;
+            api('/tasker/api/tasks', {
+                method: 'POST',
+                body: {
+                    client_ref_id: selectedClient.id,
+                    client_code: selectedClient.code || '',
+                    client_name: selectedClient.name,
+                    items: items,
+                    note_deadline_at: $('tkNoteDeadline').value,
+                    delivery_deadline_at: $('tkDeliveryDeadline').value,
+                    task_note: $('tkTaskNote').value.trim(),
+                }
+            }).then(function () {
+                btn.disabled = false;
+                bootstrap.Modal.getInstance($('tkNewModal')).hide();
+                loadBoard();
+            }).catch(function (err) {
+                btn.disabled = false;
+                showError('tkCreateError', err.message || 'Could not create task.');
+            });
+        });
+
+        // reset modal
+        $('tkResetSave').addEventListener('click', function () {
+            var id = $('tkResetModal').dataset.taskId;
+            showError('tkResetError', '');
+            var body = { reason: $('tkResetReason').value.trim() };
+            if ($('tkResetNoteClear').checked) body.note_deadline_at = null;
+            else if ($('tkResetNote').value) body.note_deadline_at = $('tkResetNote').value;
+            if ($('tkResetDeliveryClear').checked) body.delivery_deadline_at = null;
+            else if ($('tkResetDelivery').value) body.delivery_deadline_at = $('tkResetDelivery').value;
+            if (!('note_deadline_at' in body) && !('delivery_deadline_at' in body)) {
+                showError('tkResetError', 'Set at least one new deadline (or tick a clear box).'); return;
+            }
+            var btn = this; btn.disabled = true;
+            api('/tasker/api/tasks/' + id + '/reset_deadline', { method: 'POST', body: body })
+                .then(function () {
+                    btn.disabled = false;
+                    bootstrap.Modal.getInstance($('tkResetModal')).hide();
+                    loadBoard();
+                }).catch(function (err) {
+                    btn.disabled = false;
+                    showError('tkResetError', err.message || 'Reset failed.');
+                });
+        });
+
+        // live updates
+        loadBoard();
+        tickTimer = setInterval(tick, 1000);
+        pollTimer = setInterval(function () {
+            if (!document.hidden) loadBoard();
+        }, 10000);
+        document.addEventListener('visibilitychange', function () {
+            if (!document.hidden) loadBoard();
+        });
+    });
+
+    function openReset(id) {
+        var t = null;
+        for (var i = 0; i < board.tasks.length; i++) {
+            if (String(board.tasks[i].id) === String(id)) { t = board.tasks[i]; break; }
+        }
+        $('tkResetModal').dataset.taskId = id;
+        $('tkResetTaskNo').textContent = t ? t.task_no : ('#' + id);
+        $('tkResetNote').value = t && t.note_deadline_at ? localInputValue(new Date(t.note_deadline_at)) : '';
+        $('tkResetDelivery').value = t && t.delivery_deadline_at ? localInputValue(new Date(t.delivery_deadline_at)) : '';
+        $('tkResetNoteClear').checked = false;
+        $('tkResetDeliveryClear').checked = false;
+        $('tkResetReason').value = '';
+        showError('tkResetError', '');
+        new bootstrap.Modal($('tkResetModal')).show();
+    }
+})();

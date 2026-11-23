@@ -121,6 +121,19 @@ SIDEBAR_LINKS: Tuple[NavLink, ...] = (
         default_category=None,
         description="Main dashboard / home screen.",
     ),
+    # ---- Tasker (isolated tracking board — visible to every signed-in user) --
+    NavLink(
+        key="tasker",
+        label="Tasker",
+        icon="bi-card-checklist",
+        endpoint="tasker.board",
+        fallback_url="/tasker",
+        exact=("/tasker",),
+        prefix=("/tasker",),
+        perm=lambda can, user: True,
+        default_category=None,
+        description="Isolated delivery tracking board: note → loaded → dispatched → delivered, with deadlines and an overdue alarm.",
+    ),
     # ---- Inventory ------------------------------------------------------
     NavLink(
         key="stock_summary",
