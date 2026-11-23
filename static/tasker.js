@@ -660,7 +660,8 @@
         $('tkDeleteSelectedBtn').addEventListener('click', function () {
             var ids = selectedIds();
             if (!ids.length) return;
-            if (window.prompt('Type DELETE to permanently delete ' + ids.length + ' selected task(s):') !== 'DELETE') return;
+            var answer = window.prompt('Type DELETE to permanently delete ' + ids.length + ' selected task(s):');
+            if (!answer || answer.trim().toUpperCase() !== 'DELETE') return;
             showError('tkSelectedError', '');
             var btn = this; btn.disabled = true;
             api('/tasker/api/tasks/bulk_delete', {

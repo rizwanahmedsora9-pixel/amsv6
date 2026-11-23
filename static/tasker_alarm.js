@@ -33,7 +33,15 @@
         st.textContent =
             '@keyframes amsTaskerFlash{' +
             '0%,100%{background:#7f1d1d;box-shadow:0 0 0 0 rgba(220,38,38,0)}' +
-            '50%{background:#dc2626;box-shadow:0 0 30px rgba(220,38,38,.9)}}';
+            '50%{background:#dc2626;box-shadow:0 0 30px rgba(220,38,38,.9)}}' +
+            // The banner is fixed at the very top.  Push the page content
+            // below it so the Tasker header (New Task / Clean up) stays
+            // visible and clickable while an alarm is active.
+            'body.ams-tasker-alarm-active .main-content{padding-top:80px}' +
+            '@media (max-width:991.98px){' +
+            'body.ams-tasker-alarm-active .mobile-header{top:60px}' +
+            'body.ams-tasker-alarm-active .main-content{padding-top:140px}' +
+            '}';
         document.head.appendChild(st);
     }
 
@@ -45,6 +53,7 @@
         banner.style.cssText = [
             'position:fixed', 'top:0', 'left:0', 'right:0',
             'z-index:2147483000', 'box-sizing:border-box',
+            'pointer-events:none',
             'background:#7f1d1d', 'color:#fff', 'border:0',
             'border-bottom:4px solid #fecaca',
             'padding:10px 18px', 'display:flex', 'flex-wrap:wrap',
@@ -64,10 +73,11 @@
               '</div>' +
             '</div>' +
             '<button type="button" id="amsTaskerSoundBtn" ' +
-              'style="flex-shrink:0;border:0;border-radius:999px;padding:9px 15px;' +
+              'style="flex-shrink:0;pointer-events:auto;border:0;border-radius:999px;padding:9px 15px;' +
               'font-weight:800;font-size:.78rem;background:#fff;color:#7f1d1d;cursor:pointer;">' +
               '🔊 Enable siren</button>';
         document.body.appendChild(banner);
+        document.body.classList.add('ams-tasker-alarm-active');
         document.dispatchEvent(new CustomEvent('tasker:alarm-banner', { detail: { active: true } }));
         bannerText = banner.querySelector('#amsTaskerAlarmText');
         soundBtn = banner.querySelector('#amsTaskerSoundBtn');
@@ -105,6 +115,7 @@
         banner = null;
         bannerText = null;
         soundBtn = null;
+        document.body.classList.remove('ams-tasker-alarm-active');
         document.dispatchEvent(new CustomEvent('tasker:alarm-banner', { detail: { active: false } }));
     }
 
