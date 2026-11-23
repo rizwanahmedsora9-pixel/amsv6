@@ -248,18 +248,34 @@ def parse_deadline(raw):
     return parsed.replace(tzinfo=None)
 
 
+def _task_no_digits(raw):
+    """Numeric part of a 'TK-0001' task number, or None when it is not one."""
+    m = re.fullmatch(r'TK-(\d+)', (raw or '').strip())
+    return int(m.group(1)) if m else None
+
+
 def next_task_no():
     """Next permanent task number.
 
     The number must never be reused, even after a task is deleted, so the
     high-water mark is taken from both live tasks and the cleanup log.
+
+    Live tasks must be scanned by ``task_no`` as well as ``id``: after a
+    delete, a surviving row can carry a number larger than any live id (for
+    example ``TK-0007`` on id 1 once TK-0001..TK-0006 were deleted).  Using
+    ``max(id)`` alone handed that number out again and the UNIQUE index on
+    ``task_no`` rejected the insert with a 500.
     """
     top = db.session.query(db.func.max(TaskerTask.id)).scalar() or 0
+    for (no,) in db.session.query(TaskerTask.task_no).all():
+        digits = _task_no_digits(no)
+        if digits is not None:
+            top = max(top, digits)
     try:
         for (no,) in db.session.query(TaskerCleanupLog.task_no).all():
-            m = re.fullmatch(r'TK-(\d+)', (no or '').strip())
-            if m:
-                top = max(top, int(m.group(1)))
+            digits = _task_no_digits(no)
+            if digits is not None:
+                top = max(top, digits)
     except Exception:
         # Older database where create_all has not added the log table yet —
         # fall back to the live-task maximum.

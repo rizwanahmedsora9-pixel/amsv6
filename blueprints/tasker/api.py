@@ -10,6 +10,7 @@ from datetime import timedelta
 
 from flask import current_app, jsonify, request
 from flask_login import login_required, current_user
+from sqlalchemy.exc import IntegrityError
 
 from models import (
     TaskerCleanupLog,
@@ -266,7 +267,16 @@ def api_create_task():
         created_at=pk_model_now(),
     )
     db.session.add(task)
-    db.session.flush()
+    try:
+        db.session.flush()
+    except IntegrityError:
+        # Two admins can create a task in the same instant and both take the
+        # same next number.  The UNIQUE index on task_no rejects the second
+        # insert; take the next number and try once more.
+        db.session.rollback()
+        task.task_no = next_task_no()
+        db.session.add(task)
+        db.session.flush()
     for idx, raw in enumerate(items, start=1):
         db.session.add(TaskerItem(task_id=task.id, line_no=idx, **raw))
     log_event(task, 'CREATED',

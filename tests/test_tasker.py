@@ -383,6 +383,57 @@ def test_task_number_is_never_reused_after_a_delete(desk):
     assert second['task_no'] == 'TK-0002', 'a cleaned-up task number must not be reused'
 
 
+def test_create_survives_deleting_the_newest_tasks(desk):
+    """A live task number can exceed the live max id after a delete.
+
+    Deleting the newest rows leaves e.g. TK-0007 on id 1; the next create must
+    not hand out TK-0007 again (the UNIQUE index would turn it into a 500).
+    """
+    _, admin = desk
+    a = _create(admin)
+    b = _create(admin)
+    assert (a['task_no'], b['task_no']) == ('TK-0001', 'TK-0002')
+
+    for task in (a, b):
+        assert admin.post(f"/tasker/api/tasks/{task['id']}/delete",
+                          json={'confirm': 'DELETE'}).status_code == 200
+
+    c = _create(admin)
+    assert c['task_no'] == 'TK-0003'
+    d = _create(admin)
+    assert d['task_no'] == 'TK-0004'
+    e = _create(admin)
+    assert e['task_no'] == 'TK-0005'
+
+    app, _ = desk
+    with app.app_context():
+        numbers = [t.task_no for t in TaskerTask.query.order_by(TaskerTask.id).all()]
+        assert numbers == ['TK-0003', 'TK-0004', 'TK-0005']
+        assert len(set(numbers)) == len(numbers)
+
+
+def test_create_retries_when_a_concurrent_create_takes_the_same_number(desk, monkeypatch):
+    """A second admin inserting at the same instant must not get a 500."""
+    _, admin = desk
+    existing = _create(admin)
+    assert existing['task_no'] == 'TK-0001'
+
+    from blueprints.tasker import api as tasker_api
+
+    real_next = tasker_api.next_task_no
+    calls = {'n': 0}
+
+    def racing_next():
+        calls['n'] += 1
+        # First call simulates the number the other admin just inserted.
+        return 'TK-0001' if calls['n'] == 1 else real_next()
+
+    monkeypatch.setattr(tasker_api, 'next_task_no', racing_next)
+    task = _create(admin)
+    assert task['task_no'] == 'TK-0002'
+    assert calls['n'] == 2
+
+
 def test_bulk_delete_and_cleanup_are_admin_only(desk, clerk):
     app, admin = desk
     a = _create(admin)
