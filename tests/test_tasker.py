@@ -110,6 +110,8 @@ def test_page_renders_for_plain_user(desk, clerk):
     html = resp.get_data(as_text=True)
     assert 'tkBoardBody' in html
     assert 'New Task' in html  # button exists (hidden by JS for non-admins)
+    # The admin-only selection column is not rendered at all for a plain user.
+    assert 'id="tkSelectAll"' not in html
 
 
 # ---------------------------------------------------------------------------
