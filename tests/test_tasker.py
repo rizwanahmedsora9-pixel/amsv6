@@ -565,3 +565,36 @@ def test_auto_clean_settings_validation_and_history(desk):
     history = admin.get('/tasker/api/settings').get_json()['recent_cleanups']
     assert history[0]['task_no'] == task['task_no']
     assert history[0]['mode'] == 'MANUAL'
+
+
+
+# ---------------------------------------------------------------------------
+# Double-submit guard — one click must never create two tasks
+# ---------------------------------------------------------------------------
+def test_same_request_id_creates_one_task(desk):
+    app, admin = desk
+    body = _payload(request_id='form-open-1')
+    first = admin.post('/tasker/api/tasks', json=body)
+    again = admin.post('/tasker/api/tasks', json=body)   # double click / retry
+    assert first.status_code == 200 and again.status_code == 200
+    assert again.get_json()['duplicate'] is True
+    assert again.get_json()['task']['task_no'] == first.get_json()['task']['task_no']
+    assert admin.get('/tasker/api/board').get_json()['counters']['total'] == 1
+    with app.app_context():
+        assert TaskerTask.query.count() == 1
+        assert TaskerItem.query.count() == 2
+
+
+def test_new_request_id_creates_another_task(desk):
+    admin = desk[1]
+    _create(admin, request_id='form-open-1')
+    second = _create(admin, request_id='form-open-2')   # a deliberate new task
+    assert second['task_no'] == 'TK-0002'
+    assert admin.get('/tasker/api/board').get_json()['counters']['total'] == 2
+
+
+def test_requests_without_id_are_not_deduplicated(desk):
+    admin = desk[1]
+    _create(admin)
+    _create(admin)
+    assert admin.get('/tasker/api/board').get_json()['counters']['total'] == 2

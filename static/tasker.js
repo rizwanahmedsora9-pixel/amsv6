@@ -359,6 +359,7 @@
     // ---------------------------------------------------------- new task modal
     var selectedClient = null;
     var itemSeq = 0;
+    var createRequestId = null;
 
     function localInputValue(d) {
         var pad = function (n) { return String(n).padStart(2, '0'); };
@@ -543,6 +544,10 @@
         // new task modal
         $('tkNewTaskBtn').addEventListener('click', function () {
             selectedClient = null;
+            // One id per opening of the New Task form: every send from this
+            // form carries it, so a double click or a retry cannot create a
+            // second task (the server returns the one already made).
+            createRequestId = 'rq-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
             $('tkClientInput').value = '';
             $('tkClientHint').textContent = 'Start typing to search…';
             $('tkItemRows').innerHTML = '';
@@ -594,6 +599,7 @@
                     note_deadline_at: $('tkNoteDeadline').value,
                     delivery_deadline_at: $('tkDeliveryDeadline').value,
                     task_note: $('tkTaskNote').value.trim(),
+                    request_id: createRequestId || '',
                 }
             }).then(function () {
                 btn.disabled = false;
@@ -769,6 +775,19 @@
         document.addEventListener('visibilitychange', function () {
             if (!document.hidden) loadBoard();
         });
+
+        // Auto-refresh the Tasker page every 60 seconds.  Never while a dialog
+        // is open (New Task, reset, cleanup…) — a reload would throw away what
+        // the user is typing — so it waits until the dialog is closed.
+        (function scheduleAutoRefresh() {
+            setTimeout(function () {
+                if (document.querySelector('.modal.show')) {
+                    setTimeout(scheduleAutoRefresh, 5000);
+                    return;
+                }
+                window.location.reload();
+            }, 60000);
+        })();
     });
 
     // ------------------------------------------------------- cleanup helpers
