@@ -49,38 +49,39 @@
 
     // ---------------------------------------------------------------- sound
     var alarmTimer = null;
-    function beep() {
-        try {
-            var Ctx = window.AudioContext || window.webkitAudioContext;
-            if (!Ctx) return;
-            if (!beep.ctx) beep.ctx = new Ctx();
-            var ctx = beep.ctx;
-            if (ctx.state === 'suspended') ctx.resume();
-            var o = ctx.createOscillator(), g = ctx.createGain();
-            o.type = 'square'; o.frequency.value = 880;
-            o.connect(g); g.connect(ctx.destination);
-            var t = ctx.currentTime;
-            g.gain.setValueAtTime(0.10, t);
-            g.gain.setValueAtTime(0, t + 0.12);
-            g.gain.setValueAtTime(0.10, t + 0.20);
-            g.gain.setValueAtTime(0, t + 0.32);
-            o.start(t); o.stop(t + 0.35);
-        } catch (e) { /* audio unavailable — red UI still alerts */ }
-    }
     function alarmStart() {
+        if (window.AMSTaskerSiren) window.AMSTaskerSiren.start();
+        updateSoundButton();
         if (alarmTimer) return;
-        beep();
-        alarmTimer = setInterval(beep, 2500);
+        // Browsers only allow audio after a user gesture — keep retrying.
+        alarmTimer = setInterval(function () {
+            if (window.AMSTaskerSiren) window.AMSTaskerSiren.start();
+            updateSoundButton();
+        }, 1000);
     }
     function alarmStop() {
         if (alarmTimer) { clearInterval(alarmTimer); alarmTimer = null; }
+        if (window.AMSTaskerSiren) window.AMSTaskerSiren.stop();
+        updateSoundButton();
     }
-    // Browsers block audio until the first interaction — retry politely.
+    function updateSoundButton() {
+        var btn = $('tkSoundBtn');
+        if (!btn) return;
+        var on = window.AMSTaskerSiren && window.AMSTaskerSiren.isRunning();
+        btn.style.display = on ? 'none' : '';
+        btn.innerHTML = on
+            ? '<i class="bi bi-volume-up-fill me-1"></i> Siren ON'
+            : '<i class="bi bi-volume-mute-fill me-1"></i> Enable siren';
+    }
+    // Browsers block audio until the first interaction — unlock on any click/key.
     ['pointerdown', 'keydown'].forEach(function (ev) {
-        document.addEventListener(ev, function once() {
-            if (beep.ctx && beep.ctx.state === 'suspended') beep.ctx.resume();
-            if (alarmTimer) { beep(); }
-        }, { once: false, passive: true });
+        document.addEventListener(ev, function () {
+            if (!window.AMSTaskerSiren || !alarmTimer) return;
+            window.AMSTaskerSiren.unlock().then(function () {
+                window.AMSTaskerSiren.start();
+                updateSoundButton();
+            });
+        }, { passive: true });
     });
 
     // ------------------------------------------------------------- countdown
@@ -95,14 +96,19 @@
     }
     function tick() {
         var now = Date.now();
+        var anyLiveOverdue = false;
         document.querySelectorAll('.tk-count[data-dl]').forEach(function (el) {
             var dl = Date.parse(el.getAttribute('data-dl'));
             if (isNaN(dl)) { el.textContent = '—'; return; }
+            if (dl < now && el.getAttribute('data-live-alarm') === '1') anyLiveOverdue = true;
             var txt = fmtDelta(dl - now);
             el.textContent = txt;
             el.classList.toggle('tk-count-danger', dl < now);
             el.classList.toggle('tk-count-warn', dl >= now && (dl - now) < 30 * 60000);
         });
+        // Start the siren the second a live deadline passes, without waiting
+        // for the next board poll.
+        if (anyLiveOverdue) alarmStart();
     }
 
     // ----------------------------------------------------------------- api
@@ -211,8 +217,18 @@
         $('tkcOverdue').textContent = c.overdue || 0;
 
         if (c.overdue > 0) {
-            $('tkAlarmBar').style.display = 'flex';
-            $('tkAlarmText').textContent = c.overdue + ' task deadline(s) missed';
+            var labels = (board.overdue_tasks || []).map(function (t) {
+                return t.task_no + ' (' + (t.kinds || []).join('+') + ')';
+            });
+            $('tkAlarmText').textContent = c.overdue + ' deadline(s) missed — ' +
+                (labels.length ? labels.join(', ') : 'admin must reset the time');
+            if (document.getElementById('amsTaskerAlarmBanner')) {
+                // The fixed global banner already carries the message and the
+                // sound button; avoid showing the same alarm twice.
+                $('tkAlarmBar').style.display = 'none';
+            } else {
+                $('tkAlarmBar').style.display = 'flex';
+            }
             alarmStart();
         } else {
             $('tkAlarmBar').style.display = 'none';
@@ -220,6 +236,7 @@
         }
         $('tkNewTaskBtn').style.display = board.is_admin ? '' : 'none';
         $('tkCleanBtn').style.display = board.is_admin ? '' : 'none';
+        $('tkTestSirenBtn').style.display = board.is_admin ? '' : 'none';
         if (board.cleanup && board.cleanup.deleted > 0) {
             cleanNoticeUntil = Date.now() + 60000;
             cleanNoticeText = 'Auto-clean removed ' + board.cleanup.deleted +
@@ -251,11 +268,13 @@
                 (t.client_code ? '<div class="text-secondary" style="font-size:.74rem;">' + esc(t.client_code) + '</div>' : '') + '</td>' +
                 '<td style="max-width:240px;">' + itemsSummary(t) + '</td>' +
                 '<td>' + (t.note_deadline_at
-                    ? '<span class="tk-count" data-dl="' + esc(t.note_deadline_at) + '"></span>'
+                    ? '<span class="tk-count" data-dl="' + esc(t.note_deadline_at) + '" data-live-alarm="' +
+                      (t.status === 'NEW' ? '1' : '0') + '"></span>'
                     : '<span class="text-secondary">—</span>') +
                 (t.note_overdue ? ' <i class="bi bi-bell-fill text-danger"></i>' : '') + '</td>' +
                 '<td>' + (t.delivery_deadline_at
-                    ? '<span class="tk-count" data-dl="' + esc(t.delivery_deadline_at) + '"></span>'
+                    ? '<span class="tk-count" data-dl="' + esc(t.delivery_deadline_at) + '" data-live-alarm="' +
+                      ((t.status !== 'DELIVERED' && t.status !== 'CANCELLED') ? '1' : '0') + '"></span>'
                     : '<span class="text-secondary">—</span>') +
                 (t.delivery_overdue ? ' <i class="bi bi-bell-fill text-danger"></i>' : '') + '</td>' +
                 '<td>' + statusChip(t) + '</td>' +
@@ -483,6 +502,35 @@
                     else delete selected[id];
                 });
                 updateSelectionUI();
+            });
+        }
+
+        // sound unlock (browsers require a click before Web Audio can play)
+        var soundBtn = $('tkSoundBtn');
+        if (soundBtn) {
+            soundBtn.addEventListener('click', function () {
+                if (!window.AMSTaskerSiren) return;
+                window.AMSTaskerSiren.unlock().then(function () {
+                    window.AMSTaskerSiren.start();
+                    updateSoundButton();
+                });
+            });
+        }
+        var testSirenBtn = $('tkTestSirenBtn');
+        if (testSirenBtn) {
+            testSirenBtn.addEventListener('click', function () {
+                if (!window.AMSTaskerSiren) return;
+                window.AMSTaskerSiren.unlock().then(function () {
+                    window.AMSTaskerSiren.start();
+                    updateSoundButton();
+                    // A test burst only — never silence a real alarm.
+                    setTimeout(function () {
+                        if (!alarmTimer) {
+                            window.AMSTaskerSiren.stop();
+                            updateSoundButton();
+                        }
+                    }, 2500);
+                });
             });
         }
 

@@ -40,7 +40,7 @@ MODULE_CONFIG = {
     ),
     'url_prefix': '/tasker',
     'enabled': True,
-    'version': '1.1.0',
+    'version': '1.2.0',
     'author': 'AMS',
     'requires_login': True,
 }

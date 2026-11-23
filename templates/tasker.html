@@ -38,7 +38,11 @@
         padding: 5px 14px; font-size: .8rem; }
     .tk-filter-btn.active { background: #f8b71e; border-color: #f8b71e; color: #1e293b; font-weight: 700; }
     .tk-alarm-bar { background: #7f1d1d; border: 2px solid #dc3545; color: #fff; border-radius: 12px;
-        padding: 12px 18px; display: none; align-items: center; gap: 12px; animation: tk-pulse 1.6s ease-in-out infinite; }
+        padding: 12px 18px; display: none; align-items: center; gap: 12px; animation: tk-alarm-flash .8s ease-in-out infinite; }
+    @keyframes tk-alarm-flash {
+        0%, 100% { background: #7f1d1d; box-shadow: 0 0 0 0 rgba(220,53,69,0); }
+        50% { background: #dc2626; box-shadow: 0 0 28px rgba(220,53,69,.85); }
+    }
     .tk-detail-box { background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 14px; }
     .tk-timeline { border-left: 2px solid #475569; margin-left: 8px; padding-left: 16px; }
     .tk-timeline-item { position: relative; margin-bottom: 10px; font-size: .82rem; }
@@ -73,6 +77,10 @@
         <button id="tkCleanBtn" class="btn btn-outline-danger fw-bold" style="display:none;">
             <i class="bi bi-trash3 me-1"></i> Clean up
         </button>
+        <button id="tkTestSirenBtn" class="btn btn-outline-light fw-bold" style="display:none;"
+                title="Unlock and test the alarm siren">
+            <i class="bi bi-volume-up-fill me-1"></i> Test siren
+        </button>
         <button id="tkNewTaskBtn" class="btn btn-warning fw-bold" style="display:none;">
             <i class="bi bi-plus-lg me-1"></i> New Task
         </button>
@@ -88,6 +96,9 @@
         <div style="font-size:.78rem;">The alarm sounds until an admin opens the task and resets the time manually.</div>
     </div>
     <span class="tk-chip tk-chip-OVERDUE">ALARM ON</span>
+    <button type="button" class="btn btn-sm btn-light fw-bold" id="tkSoundBtn" style="display:none;">
+        <i class="bi bi-volume-mute-fill me-1"></i> Enable siren
+    </button>
 </div>
 
 <div class="row g-2 mb-3" id="tkCounters">
@@ -395,5 +406,5 @@
     </div>
 </div>
 
-<script src="{{ url_for('static', filename='tasker.js') }}?v=2"></script>
+<script src="{{ url_for('static', filename='tasker.js') }}?v=3"></script>
 {% endblock %}

@@ -107,11 +107,16 @@ path — no manual migration needed for new tables.
   - each trip turns the row **RED with a pulsing highlight** + `NOTE LATE` /
     `DELIVERY LATE` chips and starts the **looping alarm sound** (Web Audio
     beep — no audio file, works offline).
-- **Global scope** (owner decision): the same beep + a pulsing red
-  "⚠ TASKER ALARM — N deadline missed" badge follows users on **every AMS
-  page** via `static/tasker_alarm.js` (one `<script>` include in
-  `layout.html`; the widget only polls the read-only
-  `/tasker/api/alarm_state`).
+- **Global scope** (owner decision): a **police-style siren** + a fixed **red
+  flashing banner** ("⚠ TASKER ALARM — N deadline(s) missed — TK-0001
+  (NOTE+DELIVERY) …") follows users on **every AMS page** via
+  `static/tasker_alarm.js` (two `<script>` includes in `layout.html`: the
+  shared `tasker_siren.js` and the widget; the widget polls
+  `/tasker/api/alarm_state` every 5 s).  Browsers block Web Audio until the
+  first user gesture, so the banner carries an **Enable siren** button and any
+  click/keypress unlocks the siren; the red message never depends on audio.
+  The board page itself uses the same shared siren and its own flashing
+  `tkAlarmBar`, which lists the overdue task numbers and deadline kinds.
 - The alarm **cannot be dismissed by normal users** (no snooze, no mute). It
   keeps sounding until **admin**:
   1. opens the task (this is "admin sees it"),
@@ -148,8 +153,11 @@ Extends `layout.html`, Bootstrap 5 + icons + flatpickr like the rest of AMS.
     (any user); admin extras: **Reset time**, Cancel, Reopen; expandable
     detail row with items table, timeline and reset history.
 - **Alarm banner** at the top of the page whenever any deadline is overdue:
-  red bar "⚠ TASKER ALARM — N deadline(s) missed … admin must reset the time",
-  with the looping sound.
+  flashing red bar "⚠ TASKER ALARM — N deadline(s) missed — TK-0001
+  (NOTE+DELIVERY) …", with the shared police siren.  It carries an
+  **Enable siren** button (browsers require one click before audio), and the
+  admin header has a **Test siren** button to unlock/check the sound before a
+  deadline is missed.
 
 ---
 
@@ -164,8 +172,9 @@ Extends `layout.html`, Bootstrap 5 + icons + flatpickr like the rest of AMS.
 | `blueprints/tasker/api.py` | **NEW** — board JSON, combo lookups (read-only), status actions, reset deadline |
 | `templates/tasker.html` | **NEW** — the page |
 | `static/tasker.js` | **NEW** — combos, countdown, polling, alarm sound |
-| `static/tasker_alarm.js` | **NEW** — global red badge + beep on every page (owner decision) |
-| `templates/layout.html` | +1 `<script>` include for the global alarm widget |
+| `static/tasker_siren.js` | **NEW** — shared Web Audio police siren (`window.AMSTaskerSiren`) |
+| `static/tasker_alarm.js` | **NEW** — global red flashing banner + police siren on every page |
+| `templates/layout.html` | +2 `<script>` includes for the shared siren + global alarm widget |
 | `app/services/sidebar_nav.py` | +1 `NavLink` ("Tasker") |
 | `tests/test_tasker.py` | **NEW** — lifecycle, overdue→red→reset, isolation check (no writes to other tables) |
 

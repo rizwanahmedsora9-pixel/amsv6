@@ -172,6 +172,9 @@ def test_note_deadline_missed_raises_alarm_until_admin_resets(desk, clerk):
     row = board['tasks'][0]
     assert row['note_overdue'] is True
     assert row['note_alarm_on'] is True
+    assert board['overdue_tasks'] == [
+        {'task_no': task['task_no'], 'client_name': 'Test Client', 'kinds': ['NOTE']}
+    ]
 
     alarm = clerk.get('/tasker/api/alarm_state').get_json()
     assert alarm['overdue_count'] == 1
@@ -208,6 +211,8 @@ def test_delivery_deadline_missed_is_its_own_alarm(desk, clerk):
     alarm = clerk.get('/tasker/api/alarm_state').get_json()
     assert alarm['delivery_count'] == 1
     assert alarm['note_count'] == 0
+    board = clerk.get('/tasker/api/board').get_json()
+    assert board['overdue_tasks'][0]['kinds'] == ['DELIVERY']
 
     # Delivered in time-warp terms: the delivery alarm drops on delivery.
     for action in ('noted', 'loaded', 'dispatched', 'delivered'):

@@ -107,10 +107,21 @@ def api_board():
     counts = {s: 0 for s in STAGE_ORDER}
     counts['CANCELLED'] = 0
     overdue = 0
+    overdue_tasks = []
     for t in tasks:
         counts[t.status] = counts.get(t.status, 0) + 1
         if t.note_alarm_on or t.delivery_alarm_on:
             overdue += 1
+            kinds = []
+            if t.note_alarm_on:
+                kinds.append('NOTE')
+            if t.delivery_alarm_on:
+                kinds.append('DELIVERY')
+            overdue_tasks.append({
+                'task_no': t.task_no,
+                'client_name': t.client_name or '',
+                'kinds': kinds,
+            })
 
     db.session.commit()
     return jsonify({
@@ -120,6 +131,7 @@ def api_board():
             'deleted': int((auto_clean or {}).get('deleted') or 0),
             'skipped': (auto_clean or {}).get('skipped'),
         },
+        'overdue_tasks': overdue_tasks,
         'counters': {
             'total': len(tasks),
             'new': counts.get('NEW', 0),
