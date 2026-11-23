@@ -21,9 +21,11 @@ from app import create_app
 from models import (
     Client,
     Material,
+    TaskerCleanupLog,
     TaskerDeadlineReset,
     TaskerEvent,
     TaskerItem,
+    TaskerSetting,
     TaskerTask,
     User,
     db,
@@ -108,6 +110,8 @@ def test_page_renders_for_plain_user(desk, clerk):
     html = resp.get_data(as_text=True)
     assert 'tkBoardBody' in html
     assert 'New Task' in html  # button exists (hidden by JS for non-admins)
+    # The admin-only selection column is not rendered at all for a plain user.
+    assert 'id="tkSelectAll"' not in html
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +172,9 @@ def test_note_deadline_missed_raises_alarm_until_admin_resets(desk, clerk):
     row = board['tasks'][0]
     assert row['note_overdue'] is True
     assert row['note_alarm_on'] is True
+    assert board['overdue_tasks'] == [
+        {'task_no': task['task_no'], 'client_name': 'Test Client', 'kinds': ['NOTE']}
+    ]
 
     alarm = clerk.get('/tasker/api/alarm_state').get_json()
     assert alarm['overdue_count'] == 1
@@ -204,6 +211,8 @@ def test_delivery_deadline_missed_is_its_own_alarm(desk, clerk):
     alarm = clerk.get('/tasker/api/alarm_state').get_json()
     assert alarm['delivery_count'] == 1
     assert alarm['note_count'] == 0
+    board = clerk.get('/tasker/api/board').get_json()
+    assert board['overdue_tasks'][0]['kinds'] == ['DELIVERY']
 
     # Delivered in time-warp terms: the delivery alarm drops on delivery.
     for action in ('noted', 'loaded', 'dispatched', 'delivered'):
@@ -312,3 +321,196 @@ def test_full_lifecycle_touches_no_other_domain_table(desk, clerk):
 
 def future():
     return (pk_model_now() + timedelta(hours=2)).isoformat(timespec='seconds')
+
+
+# ---------------------------------------------------------------------------
+# Cleanup / auto-clean — admin-only permanent delete, even for DELIVERED tasks
+# ---------------------------------------------------------------------------
+def _deliver(web, task_id):
+    for action in ('noted', 'loaded', 'dispatched', 'delivered'):
+        resp = web.post(f'/tasker/api/tasks/{task_id}/action', json={'action': action})
+        assert resp.status_code == 200, resp.get_json()
+
+
+def _backdate(app, task_ids, days=40):
+    with app.app_context():
+        for task_id in task_ids:
+            task = TaskerTask.query.get(task_id)
+            task.updated_at = pk_model_now() - timedelta(days=days)
+        db.session.commit()
+
+
+def test_admin_can_delete_a_delivered_task_and_plain_user_cannot(desk, clerk):
+    app, admin = desk
+    task = _create(admin)
+    _deliver(clerk, task['id'])
+    assert admin.get(f"/tasker/api/tasks/{task['id']}").get_json()['status'] == 'DELIVERED'
+
+    # "even completed marked" — a normal user may never delete a completed task.
+    denied = clerk.post(f"/tasker/api/tasks/{task['id']}/delete", json={'confirm': 'DELETE'})
+    assert denied.status_code == 403
+    with app.app_context():
+        assert TaskerTask.query.get(task['id']) is not None
+
+    # A confirmation word is required server-side too.
+    no_confirm = admin.post(f"/tasker/api/tasks/{task['id']}/delete", json={'confirm': 'nope'})
+    assert no_confirm.status_code == 400
+
+    resp = admin.post(f"/tasker/api/tasks/{task['id']}/delete",
+                      json={'confirm': 'DELETE', 'reason': 'duplicate entry'})
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()['deleted']['task_no'] == task['task_no']
+
+    with app.app_context():
+        assert TaskerTask.query.get(task['id']) is None
+        assert TaskerItem.query.filter_by(task_id=task['id']).count() == 0
+        assert TaskerEvent.query.filter_by(task_id=task['id']).count() == 0
+        assert TaskerDeadlineReset.query.filter_by(task_id=task['id']).count() == 0
+        log = TaskerCleanupLog.query.filter_by(task_id=task['id']).one()
+        assert log.mode == 'MANUAL'
+        assert log.deleted_by == 'TaskerAdmin'
+        assert log.status == 'DELIVERED'
+        assert log.reason == 'duplicate entry'
+
+
+def test_task_number_is_never_reused_after_a_delete(desk):
+    _, admin = desk
+    first = _create(admin)
+    assert first['task_no'] == 'TK-0001'
+    assert admin.post(f"/tasker/api/tasks/{first['id']}/delete",
+                      json={'confirm': 'DELETE'}).status_code == 200
+    second = _create(admin)
+    assert second['task_no'] == 'TK-0002', 'a cleaned-up task number must not be reused'
+
+
+def test_bulk_delete_and_cleanup_are_admin_only(desk, clerk):
+    app, admin = desk
+    a = _create(admin)
+    b = _create(admin)
+
+    assert clerk.post('/tasker/api/tasks/bulk_delete',
+                      json={'task_ids': [a['id'], b['id']], 'confirm': 'DELETE'}).status_code == 403
+    assert clerk.post('/tasker/api/cleanup',
+                      json={'statuses': ['DELIVERED'], 'older_than_days': 0,
+                            'confirm': 'DELETE'}).status_code == 403
+    assert clerk.get('/tasker/api/settings').status_code == 403
+
+    resp = admin.post('/tasker/api/tasks/bulk_delete',
+                      json={'task_ids': [a['id'], b['id']], 'confirm': 'DELETE',
+                            'reason': 'wrong client'})
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()['deleted'] == 2
+    with app.app_context():
+        assert TaskerTask.query.count() == 0
+        assert TaskerCleanupLog.query.filter_by(mode='BULK').count() == 2
+
+
+def test_manual_cleanup_only_removes_old_closed_tasks(desk):
+    app, admin = desk
+    delivered = _create(admin)
+    cancelled = _create(admin)
+    active = _create(admin)
+
+    _deliver(admin, delivered['id'])
+    assert admin.post(f"/tasker/api/tasks/{cancelled['id']}/action",
+                      json={'action': 'cancel'}).status_code == 200
+    _backdate(app, [delivered['id'], cancelled['id'], active['id']], days=40)
+
+    # Dry run reports but changes nothing.
+    preview = admin.post('/tasker/api/cleanup',
+                         json={'statuses': ['DELIVERED', 'CANCELLED'],
+                               'older_than_days': 30, 'dry_run': True})
+    assert preview.status_code == 200, preview.get_json()
+    assert preview.get_json()['matched'] == 2
+    with app.app_context():
+        assert TaskerTask.query.count() == 3
+
+    # Real run needs DELETE and leaves the active task alone.
+    denied = admin.post('/tasker/api/cleanup',
+                        json={'statuses': ['DELIVERED', 'CANCELLED'], 'older_than_days': 30})
+    assert denied.status_code == 400
+
+    resp = admin.post('/tasker/api/cleanup',
+                      json={'statuses': ['DELIVERED', 'CANCELLED'], 'older_than_days': 30,
+                            'confirm': 'DELETE', 'reason': 'year-end cleanup'})
+    assert resp.status_code == 200, resp.get_json()
+    assert resp.get_json()['deleted'] == 2
+
+    with app.app_context():
+        assert TaskerTask.query.count() == 1
+        assert TaskerTask.query.get(active['id']) is not None
+        logs = TaskerCleanupLog.query.filter_by(mode='CLEANUP').all()
+        assert len(logs) == 2
+        assert {l.task_id for l in logs} == {delivered['id'], cancelled['id']}
+
+
+def test_auto_clean_removes_only_old_closed_tasks(desk):
+    app, admin = desk
+    delivered = _create(admin)
+    cancelled = _create(admin)
+    active = _create(admin)
+
+    _deliver(admin, delivered['id'])
+    admin.post(f"/tasker/api/tasks/{cancelled['id']}/action", json={'action': 'cancel'})
+    _backdate(app, [delivered['id'], cancelled['id'], active['id']], days=40)
+
+    saved = admin.post('/tasker/api/settings', json={
+        'auto_clean_enabled': True,
+        'auto_clean_days': 30,
+        'auto_clean_include_cancelled': True,
+    })
+    assert saved.status_code == 200, saved.get_json()
+
+    board = admin.get('/tasker/api/board').get_json()
+    assert board['cleanup']['deleted'] == 2
+    with app.app_context():
+        assert TaskerTask.query.count() == 1
+        assert TaskerTask.query.get(active['id']) is not None
+        logs = TaskerCleanupLog.query.filter_by(mode='AUTO').all()
+        assert len(logs) == 2
+        assert {l.deleted_by for l in logs} == {'auto'}
+        assert {l.task_id for l in logs} == {delivered['id'], cancelled['id']}
+
+
+def test_auto_clean_can_exclude_cancelled(desk):
+    app, admin = desk
+    delivered = _create(admin)
+    cancelled = _create(admin)
+    _deliver(admin, delivered['id'])
+    admin.post(f"/tasker/api/tasks/{cancelled['id']}/action", json={'action': 'cancel'})
+    _backdate(app, [delivered['id'], cancelled['id']], days=40)
+
+    admin.post('/tasker/api/settings', json={
+        'auto_clean_enabled': True,
+        'auto_clean_days': 30,
+        'auto_clean_include_cancelled': False,
+    })
+    admin.get('/tasker/api/board')
+    with app.app_context():
+        assert TaskerTask.query.get(cancelled['id']) is not None
+        assert TaskerTask.query.get(delivered['id']) is None
+
+
+def test_auto_clean_settings_validation_and_history(desk):
+    app, admin = desk
+    assert admin.post('/tasker/api/settings', json={'auto_clean_days': 0}).status_code == 400
+    assert admin.post('/tasker/api/settings', json={'auto_clean_days': 4000}).status_code == 400
+
+    resp = admin.post('/tasker/api/settings', json={
+        'auto_clean_enabled': True, 'auto_clean_days': 45,
+        'auto_clean_include_cancelled': False,
+    })
+    assert resp.status_code == 200
+    assert resp.get_json()['settings']['auto_clean_enabled'] is True
+    assert resp.get_json()['settings']['auto_clean_days'] == 45
+
+    got = admin.get('/tasker/api/settings').get_json()
+    assert got['settings']['auto_clean_days'] == 45
+    assert got['settings']['auto_clean_include_cancelled'] is False
+
+    # Cleanup history is exposed to the admin.
+    task = _create(admin)
+    admin.post(f"/tasker/api/tasks/{task['id']}/delete", json={'confirm': 'DELETE'})
+    history = admin.get('/tasker/api/settings').get_json()['recent_cleanups']
+    assert history[0]['task_no'] == task['task_no']
+    assert history[0]['mode'] == 'MANUAL'

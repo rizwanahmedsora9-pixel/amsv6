@@ -12,11 +12,35 @@
     var filter = 'all';
     var searchQ = '';
     var expanded = {};
+    var selected = {};          // task id -> true (ticked rows, admin cleanup)
     var pollTimer = null;
     var tickTimer = null;
+    var cleanNoticeUntil = 0;
+    var cleanNoticeText = '';
 
     // ------------------------------------------------------------------ dom
     function $(id) { return document.getElementById(id); }
+    function findTask(id) {
+        for (var i = 0; i < board.tasks.length; i++) {
+            if (String(board.tasks[i].id) === String(id)) return board.tasks[i];
+        }
+        return null;
+    }
+    function selectedIds() {
+        return Object.keys(selected).filter(function (k) { return selected[k]; }).map(Number);
+    }
+    function updateSelectionUI() {
+        var ids = selectedIds();
+        $('tkSelCount').textContent = ids.length;
+        $('tkCleanSelCount').textContent = ids.length;
+        $('tkCleanSelectedBtn').style.display = (board.is_admin && ids.length) ? '' : 'none';
+        $('tkDeleteSelectedBtn').disabled = ids.length === 0;
+        var boxes = document.querySelectorAll('.tk-select');
+        var allChecked = boxes.length > 0;
+        boxes.forEach(function (cb) { if (!cb.checked) allChecked = false; });
+        var all = $('tkSelectAll');
+        if (all) { all.checked = allChecked; all.disabled = boxes.length === 0; }
+    }
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
             return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -25,38 +49,39 @@
 
     // ---------------------------------------------------------------- sound
     var alarmTimer = null;
-    function beep() {
-        try {
-            var Ctx = window.AudioContext || window.webkitAudioContext;
-            if (!Ctx) return;
-            if (!beep.ctx) beep.ctx = new Ctx();
-            var ctx = beep.ctx;
-            if (ctx.state === 'suspended') ctx.resume();
-            var o = ctx.createOscillator(), g = ctx.createGain();
-            o.type = 'square'; o.frequency.value = 880;
-            o.connect(g); g.connect(ctx.destination);
-            var t = ctx.currentTime;
-            g.gain.setValueAtTime(0.10, t);
-            g.gain.setValueAtTime(0, t + 0.12);
-            g.gain.setValueAtTime(0.10, t + 0.20);
-            g.gain.setValueAtTime(0, t + 0.32);
-            o.start(t); o.stop(t + 0.35);
-        } catch (e) { /* audio unavailable — red UI still alerts */ }
-    }
     function alarmStart() {
+        if (window.AMSTaskerSiren) window.AMSTaskerSiren.start();
+        updateSoundButton();
         if (alarmTimer) return;
-        beep();
-        alarmTimer = setInterval(beep, 2500);
+        // Browsers only allow audio after a user gesture — keep retrying.
+        alarmTimer = setInterval(function () {
+            if (window.AMSTaskerSiren) window.AMSTaskerSiren.start();
+            updateSoundButton();
+        }, 1000);
     }
     function alarmStop() {
         if (alarmTimer) { clearInterval(alarmTimer); alarmTimer = null; }
+        if (window.AMSTaskerSiren) window.AMSTaskerSiren.stop();
+        updateSoundButton();
     }
-    // Browsers block audio until the first interaction — retry politely.
+    function updateSoundButton() {
+        var btn = $('tkSoundBtn');
+        if (!btn) return;
+        var on = window.AMSTaskerSiren && window.AMSTaskerSiren.isRunning();
+        btn.style.display = on ? 'none' : '';
+        btn.innerHTML = on
+            ? '<i class="bi bi-volume-up-fill me-1"></i> Siren ON'
+            : '<i class="bi bi-volume-mute-fill me-1"></i> Enable siren';
+    }
+    // Browsers block audio until the first interaction — unlock on any click/key.
     ['pointerdown', 'keydown'].forEach(function (ev) {
-        document.addEventListener(ev, function once() {
-            if (beep.ctx && beep.ctx.state === 'suspended') beep.ctx.resume();
-            if (alarmTimer) { beep(); }
-        }, { once: false, passive: true });
+        document.addEventListener(ev, function () {
+            if (!window.AMSTaskerSiren || !alarmTimer) return;
+            window.AMSTaskerSiren.unlock().then(function () {
+                window.AMSTaskerSiren.start();
+                updateSoundButton();
+            });
+        }, { passive: true });
     });
 
     // ------------------------------------------------------------- countdown
@@ -71,14 +96,19 @@
     }
     function tick() {
         var now = Date.now();
+        var anyLiveOverdue = false;
         document.querySelectorAll('.tk-count[data-dl]').forEach(function (el) {
             var dl = Date.parse(el.getAttribute('data-dl'));
             if (isNaN(dl)) { el.textContent = '—'; return; }
+            if (dl < now && el.getAttribute('data-live-alarm') === '1') anyLiveOverdue = true;
             var txt = fmtDelta(dl - now);
             el.textContent = txt;
             el.classList.toggle('tk-count-danger', dl < now);
             el.classList.toggle('tk-count-warn', dl >= now && (dl - now) < 30 * 60000);
         });
+        // Start the siren the second a live deadline passes, without waiting
+        // for the next board poll.
+        if (anyLiveOverdue) alarmStart();
     }
 
     // ----------------------------------------------------------------- api
@@ -145,6 +175,7 @@
             if (t.status === 'CANCELLED') {
                 btns.push('<button class="btn btn-sm btn-outline-success tk-act" data-id="' + t.id + '" data-action="reopen">Reopen</button>');
             }
+            btns.push('<button class="btn btn-sm btn-outline-danger tk-del" data-id="' + t.id + '" title="Delete task (admin only)"><i class="bi bi-trash3"></i></button>');
         }
         btns.push('<button class="btn btn-sm btn-outline-light tk-detail-toggle" data-id="' + t.id + '">Detail</button>');
         return btns.join(' ');
@@ -166,7 +197,8 @@
                 ' → ' + esc(String(r.new_deadline || 'cleared').replace('T', ' ')) + ' by ' + esc(r.by_user || '?') +
                 (r.reason ? ' (' + esc(r.reason) + ')' : '') + '</div>';
         }).join('');
-        return '<tr class="tk-detail-row" data-for="' + t.id + '"><td colspan="8"><div class="tk-detail-box">' +
+        var colspan = board.is_admin ? 9 : 8;
+        return '<tr class="tk-detail-row" data-for="' + t.id + '"><td colspan="' + colspan + '"><div class="tk-detail-box">' +
             '<div class="row g-3"><div class="col-md-6">' +
             '<div class="fw-bold mb-1">Items</div><table class="table table-dark table-sm mb-0"><thead><tr><th>#</th><th>Material / brand</th><th>Qty</th><th>Warranty</th><th>Note</th></tr></thead><tbody>' +
             items + '</tbody></table>' +
@@ -185,35 +217,64 @@
         $('tkcOverdue').textContent = c.overdue || 0;
 
         if (c.overdue > 0) {
-            $('tkAlarmBar').style.display = 'flex';
-            $('tkAlarmText').textContent = c.overdue + ' task deadline(s) missed';
+            var labels = (board.overdue_tasks || []).map(function (t) {
+                return t.task_no + ' (' + (t.kinds || []).join('+') + ')';
+            });
+            $('tkAlarmText').textContent = c.overdue + ' deadline(s) missed — ' +
+                (labels.length ? labels.join(', ') : 'admin must reset the time');
+            if (document.getElementById('amsTaskerAlarmBanner')) {
+                // The fixed global banner already carries the message and the
+                // sound button; avoid showing the same alarm twice.
+                $('tkAlarmBar').style.display = 'none';
+            } else {
+                $('tkAlarmBar').style.display = 'flex';
+            }
             alarmStart();
         } else {
             $('tkAlarmBar').style.display = 'none';
             alarmStop();
         }
         $('tkNewTaskBtn').style.display = board.is_admin ? '' : 'none';
+        $('tkCleanBtn').style.display = board.is_admin ? '' : 'none';
+        $('tkTestSirenBtn').style.display = board.is_admin ? '' : 'none';
+        if (board.cleanup && board.cleanup.deleted > 0) {
+            cleanNoticeUntil = Date.now() + 60000;
+            cleanNoticeText = 'Auto-clean removed ' + board.cleanup.deleted +
+                ' closed task(s). See Clean up → Recent cleanups for the permanent log.';
+        }
+        if (cleanNoticeText && Date.now() < cleanNoticeUntil) {
+            $('tkCleanNotice').style.display = 'block';
+            $('tkCleanNotice').textContent = cleanNoticeText;
+        } else {
+            $('tkCleanNotice').style.display = 'none';
+        }
 
         var body = $('tkBoardBody');
+        var colCount = board.is_admin ? 9 : 8;
         if (!board.tasks.length) {
-            body.innerHTML = '<tr><td colspan="8" class="text-center text-secondary py-4">No tasks' +
+            body.innerHTML = '<tr><td colspan="' + colCount + '" class="text-center text-secondary py-4">No tasks' +
                 (filter !== 'all' || searchQ ? ' match this filter.' : ' yet.') + '</td></tr>';
+            updateSelectionUI();
             return;
         }
         body.innerHTML = board.tasks.map(function (t) {
             var overdue = t.note_overdue || t.delivery_overdue;
             var row = '<tr class="' + (overdue ? 'tk-row-overdue' : '') + '" data-row="' + t.id + '">' +
+                (board.is_admin ? '<td><input type="checkbox" class="tk-select" data-id="' + t.id + '"' +
+                    (selected[t.id] ? ' checked' : '') + '></td>' : '') +
                 '<td><span class="fw-bold tk-link tk-detail-toggle" data-id="' + t.id + '">' + esc(t.task_no) + '</span>' +
                 '<div class="text-secondary" style="font-size:.72rem;">#' + esc(t.id) + ' · resets: ' + esc(t.deadline_reset_count || 0) + '</div></td>' +
                 '<td><div class="fw-semibold">' + esc(t.client_name) + '</div>' +
                 (t.client_code ? '<div class="text-secondary" style="font-size:.74rem;">' + esc(t.client_code) + '</div>' : '') + '</td>' +
                 '<td style="max-width:240px;">' + itemsSummary(t) + '</td>' +
                 '<td>' + (t.note_deadline_at
-                    ? '<span class="tk-count" data-dl="' + esc(t.note_deadline_at) + '"></span>'
+                    ? '<span class="tk-count" data-dl="' + esc(t.note_deadline_at) + '" data-live-alarm="' +
+                      (t.status === 'NEW' ? '1' : '0') + '"></span>'
                     : '<span class="text-secondary">—</span>') +
                 (t.note_overdue ? ' <i class="bi bi-bell-fill text-danger"></i>' : '') + '</td>' +
                 '<td>' + (t.delivery_deadline_at
-                    ? '<span class="tk-count" data-dl="' + esc(t.delivery_deadline_at) + '"></span>'
+                    ? '<span class="tk-count" data-dl="' + esc(t.delivery_deadline_at) + '" data-live-alarm="' +
+                      ((t.status !== 'DELIVERED' && t.status !== 'CANCELLED') ? '1' : '0') + '"></span>'
                     : '<span class="text-secondary">—</span>') +
                 (t.delivery_overdue ? ' <i class="bi bi-bell-fill text-danger"></i>' : '') + '</td>' +
                 '<td>' + statusChip(t) + '</td>' +
@@ -222,6 +283,7 @@
             if (expanded[t.id]) row += detailRow(t);
             return row;
         }).join('');
+        updateSelectionUI();
         tick();
     }
 
@@ -397,6 +459,11 @@
                     .catch(function (err) { alert(err.message || 'Action failed'); act.disabled = false; });
                 return;
             }
+            var del = e.target.closest('.tk-del');
+            if (del) {
+                openDeleteModal(del.getAttribute('data-id'));
+                return;
+            }
             var rst = e.target.closest('.tk-reset');
             if (rst) {
                 openReset(rst.getAttribute('data-id'));
@@ -414,6 +481,64 @@
                 }
             }
         });
+
+        // row selection (admin cleanup)
+        $('tkBoardBody').addEventListener('change', function (e) {
+            var cb = e.target.closest('.tk-select');
+            if (!cb) return;
+            var id = cb.getAttribute('data-id');
+            if (cb.checked) selected[id] = true;
+            else delete selected[id];
+            updateSelectionUI();
+        });
+        var selectAll = $('tkSelectAll');
+        if (selectAll) {
+            selectAll.addEventListener('change', function () {
+                var checked = selectAll.checked;
+                document.querySelectorAll('.tk-select').forEach(function (cb) {
+                    cb.checked = checked;
+                    var id = cb.getAttribute('data-id');
+                    if (checked) selected[id] = true;
+                    else delete selected[id];
+                });
+                updateSelectionUI();
+            });
+        }
+
+        // The global alarm widget owns the fixed red banner; hide the inline
+        // bar while it is showing so the message is not duplicated.
+        document.addEventListener('tasker:alarm-banner', function (e) {
+            if (e.detail && e.detail.active) $('tkAlarmBar').style.display = 'none';
+        });
+
+        // sound unlock (browsers require a click before Web Audio can play)
+        var soundBtn = $('tkSoundBtn');
+        if (soundBtn) {
+            soundBtn.addEventListener('click', function () {
+                if (!window.AMSTaskerSiren) return;
+                window.AMSTaskerSiren.unlock().then(function () {
+                    window.AMSTaskerSiren.start();
+                    updateSoundButton();
+                });
+            });
+        }
+        var testSirenBtn = $('tkTestSirenBtn');
+        if (testSirenBtn) {
+            testSirenBtn.addEventListener('click', function () {
+                if (!window.AMSTaskerSiren) return;
+                window.AMSTaskerSiren.unlock().then(function () {
+                    window.AMSTaskerSiren.start();
+                    updateSoundButton();
+                    // A test burst only — never silence a real alarm.
+                    setTimeout(function () {
+                        if (!alarmTimer) {
+                            window.AMSTaskerSiren.stop();
+                            updateSoundButton();
+                        }
+                    }, 2500);
+                });
+            });
+        }
 
         // new task modal
         $('tkNewTaskBtn').addEventListener('click', function () {
@@ -504,6 +629,136 @@
                 });
         });
 
+        // ---------------------------------------------------- cleanup (admin)
+        $('tkCleanBtn').addEventListener('click', openCleanModal);
+        $('tkCleanSelectedBtn').addEventListener('click', function () {
+            openCleanModal();
+            setTimeout(function () { $('tkDeleteSelectedBtn').focus(); }, 450);
+        });
+
+        $('tkDeleteConfirm').addEventListener('input', function () {
+            $('tkDeleteSave').disabled = this.value.trim().toUpperCase() !== 'DELETE';
+        });
+        $('tkDeleteSave').addEventListener('click', function () {
+            var id = $('tkDeleteModal').dataset.taskId;
+            showError('tkDeleteError', '');
+            var btn = this; btn.disabled = true;
+            api('/tasker/api/tasks/' + id + '/delete', {
+                method: 'POST',
+                body: { confirm: 'DELETE', reason: $('tkDeleteReason').value.trim() },
+            }).then(function () {
+                btn.disabled = false;
+                bootstrap.Modal.getInstance($('tkDeleteModal')).hide();
+                delete selected[id];
+                loadBoard();
+            }).catch(function (err) {
+                btn.disabled = false;
+                showError('tkDeleteError', err.message || 'Delete failed.');
+            });
+        });
+
+        $('tkDeleteSelectedBtn').addEventListener('click', function () {
+            var ids = selectedIds();
+            if (!ids.length) return;
+            if (window.prompt('Type DELETE to permanently delete ' + ids.length + ' selected task(s):') !== 'DELETE') return;
+            showError('tkSelectedError', '');
+            var btn = this; btn.disabled = true;
+            api('/tasker/api/tasks/bulk_delete', {
+                method: 'POST',
+                body: {
+                    task_ids: ids,
+                    confirm: 'DELETE',
+                    reason: $('tkSelectedReason').value.trim(),
+                },
+            }).then(function (data) {
+                btn.disabled = false;
+                selected = {};
+                updateSelectionUI();
+                if (data.deleted) {
+                    $('tkSelectedError').className = 'text-success mt-2';
+                    $('tkSelectedError').textContent = data.deleted + ' task(s) deleted permanently.';
+                    $('tkSelectedError').style.display = 'block';
+                }
+                loadBoard();
+                loadCleanSettings();
+            }).catch(function (err) {
+                btn.disabled = false;
+                $('tkSelectedError').className = 'text-danger mt-2';
+                $('tkSelectedError').textContent = err.message || 'Delete failed.';
+                $('tkSelectedError').style.display = 'block';
+            });
+        });
+
+        $('tkSaveSettings').addEventListener('click', function () {
+            var btn = this; btn.disabled = true;
+            api('/tasker/api/settings', {
+                method: 'POST',
+                body: {
+                    auto_clean_enabled: $('tkAutoCleanEnabled').checked,
+                    auto_clean_days: parseInt($('tkAutoCleanDays').value, 10) || 30,
+                    auto_clean_include_cancelled: $('tkAutoCleanCancelled').checked,
+                },
+            }).then(function (data) {
+                btn.disabled = false;
+                $('tkSettingsMsg').className = 'text-success';
+                $('tkSettingsMsg').textContent = 'Saved — auto-clean is ' +
+                    (data.settings.auto_clean_enabled ? 'ON' : 'OFF') + '.';
+            }).catch(function (err) {
+                btn.disabled = false;
+                $('tkSettingsMsg').className = 'text-danger';
+                $('tkSettingsMsg').textContent = err.message || 'Save failed.';
+            });
+        });
+
+        $('tkCleanPreviewBtn').addEventListener('click', function () {
+            showError('tkCleanError', '');
+            var btn = this; btn.disabled = true;
+            api('/tasker/api/cleanup', { method: 'POST', body: cleanupBody(true) }).then(function (data) {
+                btn.disabled = false;
+                $('tkCleanPreview').className = data.matched ? 'mt-2 text-warning' : 'mt-2 text-secondary';
+                $('tkCleanPreview').innerHTML = '<strong>' + data.matched + '</strong> closed task(s) match.' +
+                    (data.matched ? ' Press Delete matched to remove them permanently.' : '');
+            }).catch(function (err) {
+                btn.disabled = false;
+                showError('tkCleanError', err.message || 'Preview failed.');
+            });
+        });
+
+        $('tkCleanConfirm').addEventListener('input', function () {
+            $('tkCleanRunBtn').disabled = this.value.trim().toUpperCase() !== 'DELETE';
+        });
+        // Changing the sweep after typing DELETE must re-arm the confirmation.
+        ['tkCleanDays', 'tkCleanDelivered', 'tkCleanCancelled'].forEach(function (id) {
+            $(id).addEventListener('input', function () {
+                $('tkCleanConfirm').value = '';
+                $('tkCleanRunBtn').disabled = true;
+                $('tkCleanPreview').className = 'mt-2 text-secondary';
+                $('tkCleanPreview').textContent = 'Press Preview to see how many closed tasks match.';
+            });
+            $(id).addEventListener('change', function () {
+                $('tkCleanConfirm').value = '';
+                $('tkCleanRunBtn').disabled = true;
+                $('tkCleanPreview').className = 'mt-2 text-secondary';
+                $('tkCleanPreview').textContent = 'Press Preview to see how many closed tasks match.';
+            });
+        });
+        $('tkCleanRunBtn').addEventListener('click', function () {
+            showError('tkCleanError', '');
+            var btn = this; btn.disabled = true;
+            api('/tasker/api/cleanup', { method: 'POST', body: cleanupBody(false) }).then(function (data) {
+                btn.disabled = false;
+                $('tkCleanPreview').className = 'mt-2 text-success';
+                $('tkCleanPreview').innerHTML = '<strong>' + data.deleted + '</strong> task(s) deleted permanently.';
+                $('tkCleanConfirm').value = '';
+                $('tkCleanRunBtn').disabled = true;
+                loadCleanSettings();
+                loadBoard();
+            }).catch(function (err) {
+                btn.disabled = false;
+                showError('tkCleanError', err.message || 'Cleanup failed.');
+            });
+        });
+
         // live updates
         loadBoard();
         tickTimer = setInterval(tick, 1000);
@@ -514,6 +769,72 @@
             if (!document.hidden) loadBoard();
         });
     });
+
+    // ------------------------------------------------------- cleanup helpers
+    function cleanupBody(dryRun) {
+        var statuses = [];
+        if ($('tkCleanDelivered').checked) statuses.push('DELIVERED');
+        if ($('tkCleanCancelled').checked) statuses.push('CANCELLED');
+        return {
+            statuses: statuses,
+            older_than_days: parseInt($('tkCleanDays').value, 10) || 0,
+            dry_run: !!dryRun,
+            reason: $('tkCleanReason').value.trim(),
+            confirm: dryRun ? undefined : 'DELETE',
+        };
+    }
+
+    function openDeleteModal(id) {
+        var t = findTask(id);
+        $('tkDeleteModal').dataset.taskId = id;
+        $('tkDeleteTaskNo').textContent = t ? t.task_no : ('#' + id);
+        $('tkDeleteSummary').innerHTML = t
+            ? '<div><strong>' + esc(t.client_name || '—') + '</strong> · ' + statusChip(t) + '</div>' +
+              '<div class="text-secondary">Items: ' + (t.items || []).length +
+              ' · deadline resets: ' + esc(t.deadline_reset_count || 0) + '</div>'
+            : '';
+        $('tkDeleteReason').value = '';
+        $('tkDeleteConfirm').value = '';
+        $('tkDeleteSave').disabled = true;
+        showError('tkDeleteError', '');
+        new bootstrap.Modal($('tkDeleteModal')).show();
+    }
+
+    function openCleanModal() {
+        updateSelectionUI();
+        $('tkCleanPreview').className = 'mt-2 text-secondary';
+        $('tkCleanPreview').textContent = 'Press Preview to see how many closed tasks match.';
+        $('tkCleanConfirm').value = '';
+        $('tkCleanRunBtn').disabled = true;
+        $('tkCleanError').style.display = 'none';
+        $('tkSelectedError').style.display = 'none';
+        $('tkSelectedError').textContent = '';
+        $('tkSettingsMsg').textContent = '';
+        $('tkSettingsMsg').className = 'text-secondary';
+        $('tkRecentCleanups').textContent = 'Loading…';
+        new bootstrap.Modal($('tkCleanModal')).show();
+        loadCleanSettings();
+    }
+
+    function loadCleanSettings() {
+        api('/tasker/api/settings').then(function (data) {
+            var s = data.settings || {};
+            $('tkAutoCleanEnabled').checked = !!s.auto_clean_enabled;
+            $('tkAutoCleanDays').value = s.auto_clean_days || 30;
+            $('tkAutoCleanCancelled').checked = s.auto_clean_include_cancelled !== false;
+            var rows = data.recent_cleanups || [];
+            $('tkRecentCleanups').innerHTML = rows.map(function (c) {
+                return '<div class="tk-recent-cleanup"><strong>' + esc(c.task_no) + '</strong> · ' +
+                    esc(c.client_name || '—') + ' · ' + esc(c.status || '') +
+                    ' <span class="text-secondary">— removed by ' + esc(c.deleted_by || '—') +
+                    ' · ' + esc(String(c.deleted_at || '').replace('T', ' ')) + '</span>' +
+                    (c.reason ? '<div class="text-secondary">' + esc(c.reason) + '</div>' : '') +
+                    '</div>';
+            }).join('') || '<div class="text-secondary">No cleanups yet.</div>';
+        }).catch(function () {
+            $('tkRecentCleanups').textContent = 'Could not load cleanup history.';
+        });
+    }
 
     function openReset(id) {
         var t = null;

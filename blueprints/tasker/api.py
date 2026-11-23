@@ -5,23 +5,39 @@ boxes.  Every mutation writes ONLY tasker_* tables.
 """
 from __future__ import annotations
 
-from flask import jsonify, request
+import logging
+from datetime import timedelta
+
+from flask import current_app, jsonify, request
 from flask_login import login_required, current_user
 
-from models import TaskerDeadlineReset, TaskerItem, TaskerTask, db, pk_model_now
+from models import (
+    TaskerCleanupLog,
+    TaskerDeadlineReset,
+    TaskerItem,
+    TaskerSetting,
+    TaskerTask,
+    db,
+    pk_model_now,
+)
 
 from ._common import (
     STAGE_ORDER,
     TERMINAL_STATUSES,
+    cleanup_to_dict,
+    delete_tasks,
     event_to_dict,
+    get_or_create_settings,
     is_admin,
     log_event,
     next_task_no,
     parse_deadline,
     require_admin,
     reset_to_dict,
+    run_auto_clean,
     search_clients,
     search_materials,
+    settings_dict,
     sync_alarms,
     tasker_bp,
     task_to_dict,
@@ -53,6 +69,14 @@ def _board_query():
 def api_board():
     """Total list + counters.  Also syncs alarm transitions (tasker_* only)."""
     now = pk_model_now()
+    # Auto-clean runs before the list is loaded so a freshly removed task does
+    # not flash on screen for one poll.  Only closed tasks can ever be removed.
+    try:
+        auto_clean = run_auto_clean(now=now)
+    except Exception:
+        db.session.rollback()
+        logging.getLogger('tasker').exception('Tasker auto-clean sweep failed')
+        auto_clean = {'deleted': 0, 'skipped': 'error'}
     tasks = _board_query().all()
     for t in tasks:
         sync_alarms(t, now=now)
@@ -83,15 +107,31 @@ def api_board():
     counts = {s: 0 for s in STAGE_ORDER}
     counts['CANCELLED'] = 0
     overdue = 0
+    overdue_tasks = []
     for t in tasks:
         counts[t.status] = counts.get(t.status, 0) + 1
         if t.note_alarm_on or t.delivery_alarm_on:
             overdue += 1
+            kinds = []
+            if t.note_alarm_on:
+                kinds.append('NOTE')
+            if t.delivery_alarm_on:
+                kinds.append('DELIVERY')
+            overdue_tasks.append({
+                'task_no': t.task_no,
+                'client_name': t.client_name or '',
+                'kinds': kinds,
+            })
 
     db.session.commit()
     return jsonify({
         'now': now.isoformat(timespec='seconds'),
         'is_admin': is_admin(),
+        'cleanup': {
+            'deleted': int((auto_clean or {}).get('deleted') or 0),
+            'skipped': (auto_clean or {}).get('skipped'),
+        },
+        'overdue_tasks': overdue_tasks,
         'counters': {
             'total': len(tasks),
             'new': counts.get('NEW', 0),
@@ -109,8 +149,18 @@ def api_board():
 @tasker_bp.route('/api/alarm_state')
 @login_required
 def api_alarm_state():
-    """Cheap poll for the global alarm widget (read-only — no writes)."""
+    """Cheap poll for the global alarm widget.
+
+    The alarm read itself is read-only, but this poll runs on every AMS page,
+    so it doubles as the trigger for the tasker auto-clean sweep (throttled to
+    once per process every few minutes, and only when an admin enabled it).
+    """
     now = pk_model_now()
+    try:
+        run_auto_clean(now=now)
+    except Exception:
+        db.session.rollback()
+        logging.getLogger('tasker').exception('Tasker auto-clean poll failed')
     rows = TaskerTask.query.filter(
         TaskerTask.status.notin_(TERMINAL_STATUSES)
     ).all()
@@ -333,3 +383,209 @@ def api_task_reset_deadline(task_id):
     sync_alarms(task, now=now, commit=False)
     db.session.commit()
     return jsonify({'success': True, 'task': task_to_dict(task)})
+
+
+# ---------------------------------------------------------------------------
+# Cleanup / auto-clean (admin only) — permanent delete of any task, including
+# DELIVERED and CANCELLED ones.  Every removal is recorded in tasker_cleanup_log.
+# ---------------------------------------------------------------------------
+def _as_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _confirm_delete(payload):
+    return str((payload or {}).get('confirm') or '').strip().upper() == 'DELETE'
+
+
+@tasker_bp.route('/api/settings', methods=['GET'])
+@login_required
+def api_get_settings():
+    guard = require_admin()
+    if guard is not None:
+        return guard
+    row = TaskerSetting.query.get(1)
+    recent = (
+        TaskerCleanupLog.query
+        .order_by(TaskerCleanupLog.id.desc())
+        .limit(12)
+        .all()
+    )
+    return jsonify({
+        'success': True,
+        'settings': settings_dict(row),
+        'recent_cleanups': [cleanup_to_dict(c) for c in recent],
+    })
+
+
+@tasker_bp.route('/api/settings', methods=['POST'])
+@login_required
+def api_save_settings():
+    guard = require_admin()
+    if guard is not None:
+        return guard
+
+    payload = request.get_json(silent=True) or {}
+    raw_days = payload.get('auto_clean_days')
+    try:
+        days = int(float(raw_days)) if raw_days is not None and str(raw_days).strip() else 30
+    except (TypeError, ValueError):
+        return jsonify({'success': False,
+                        'error': 'Auto-clean days must be a whole number.'}), 400
+    if not 1 <= days <= 3650:
+        return jsonify({'success': False,
+                        'error': 'Auto-clean days must be between 1 and 3650.'}), 400
+
+    row = get_or_create_settings()
+    row.auto_clean_enabled = _as_bool(payload.get('auto_clean_enabled'), False)
+    row.auto_clean_days = days
+    row.auto_clean_include_cancelled = _as_bool(
+        payload.get('auto_clean_include_cancelled'), True
+    )
+    row.updated_by = current_user.username
+    db.session.commit()
+    # New switches should take effect on the very next poll, not after the
+    # throttle window of a previous sweep.
+    current_app.extensions.pop('tasker_auto_clean', None)
+    return jsonify({'success': True, 'settings': settings_dict(row)})
+
+
+@tasker_bp.route('/api/tasks/<int:task_id>/delete', methods=['POST'])
+@login_required
+def api_task_delete(task_id):
+    """Admin-only permanent delete — works for every status, DELIVERED too."""
+    guard = require_admin()
+    if guard is not None:
+        return guard
+    payload = request.get_json(silent=True) or {}
+    if not _confirm_delete(payload):
+        return jsonify({'success': False,
+                        'error': 'Type DELETE to confirm this permanent deletion.'}), 400
+
+    task = TaskerTask.query.get_or_404(task_id)
+    data = task_to_dict(task)
+    summary = delete_tasks(
+        [task], mode='MANUAL', by_user=current_user.username,
+        reason=str(payload.get('reason') or '').strip(),
+    )[0]
+    db.session.commit()
+    return jsonify({'success': True, 'deleted': summary, 'task': data})
+
+
+@tasker_bp.route('/api/tasks/bulk_delete', methods=['POST'])
+@login_required
+def api_tasks_bulk_delete():
+    """Admin-only permanent delete of the ticked rows (any status)."""
+    guard = require_admin()
+    if guard is not None:
+        return guard
+    payload = request.get_json(silent=True) or {}
+    if not _confirm_delete(payload):
+        return jsonify({'success': False,
+                        'error': 'Type DELETE to confirm this permanent deletion.'}), 400
+
+    raw_ids = payload.get('task_ids')
+    if isinstance(raw_ids, (int, str)):
+        raw_ids = [raw_ids]
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return jsonify({'success': False, 'error': 'No tasks selected.'}), 400
+    ids = set()
+    for raw in raw_ids:
+        try:
+            ids.add(int(raw))
+        except (TypeError, ValueError):
+            return jsonify({'success': False,
+                            'error': f'Invalid task id: {raw!r}'}), 400
+    if len(ids) > 200:
+        return jsonify({'success': False,
+                        'error': 'Select at most 200 tasks at once.'}), 400
+
+    rows = TaskerTask.query.filter(TaskerTask.id.in_(ids)).all()
+    deleted = delete_tasks(
+        rows, mode='BULK', by_user=current_user.username,
+        reason=str(payload.get('reason') or '').strip(),
+    )
+    db.session.commit()
+    return jsonify({
+        'success': True,
+        'deleted': len(deleted),
+        'tasks': deleted,
+        'missing': sorted(ids - {d['id'] for d in deleted}),
+    })
+
+
+@tasker_bp.route('/api/cleanup', methods=['POST'])
+@login_required
+def api_cleanup():
+    """Admin-only age sweep over closed tasks (dry run or real delete)."""
+    guard = require_admin()
+    if guard is not None:
+        return guard
+
+    payload = request.get_json(silent=True) or {}
+    raw_statuses = payload.get('statuses')
+    if raw_statuses is None:
+        statuses = ['DELIVERED', 'CANCELLED']
+    else:
+        if isinstance(raw_statuses, str):
+            raw_statuses = [raw_statuses]
+        statuses = sorted({
+            str(s).strip().upper() for s in (raw_statuses or [])
+            if str(s).strip().upper() in TERMINAL_STATUSES
+        })
+    if not statuses:
+        return jsonify({'success': False,
+                        'error': 'Choose at least one closed status.'}), 400
+
+    try:
+        days = int(float(payload.get('older_than_days', 30)))
+    except (TypeError, ValueError):
+        return jsonify({'success': False,
+                        'error': 'Days must be a whole number.'}), 400
+    if not 0 <= days <= 3650:
+        return jsonify({'success': False,
+                        'error': 'Days must be between 0 and 3650.'}), 400
+
+    dry_run = _as_bool(payload.get('dry_run'), False)
+    if not dry_run and not _confirm_delete(payload):
+        return jsonify({'success': False,
+                        'error': 'Type DELETE to confirm this permanent deletion.'}), 400
+
+    now = pk_model_now()
+    cutoff = now - timedelta(days=days)
+    rows = (
+        TaskerTask.query
+        .filter(TaskerTask.status.in_(statuses))
+        .filter(db.func.coalesce(TaskerTask.updated_at, TaskerTask.created_at) <= cutoff)
+        .order_by(TaskerTask.id.asc())
+        .limit(500)
+        .all()
+    )
+    summary = [{
+        'id': t.id,
+        'task_no': t.task_no,
+        'client_name': t.client_name or '',
+        'status': t.status,
+        'updated_at': t.updated_at.isoformat(timespec='seconds') if t.updated_at else None,
+    } for t in rows]
+
+    deleted = []
+    if not dry_run and rows:
+        deleted = delete_tasks(
+            rows, mode='CLEANUP', by_user=current_user.username,
+            reason=str(payload.get('reason') or '').strip(),
+        )
+        db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'dry_run': dry_run,
+        'statuses': statuses,
+        'older_than_days': days,
+        'matched': len(rows),
+        'deleted': len(deleted),
+        'tasks': summary,
+    })

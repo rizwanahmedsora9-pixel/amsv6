@@ -138,3 +138,48 @@ class TaskerDeadlineReset(db.Model):
     by_user = db.Column(db.String(80), nullable=True)
     at = db.Column(db.DateTime, default=pk_model_now)
     reason = db.Column(db.String(200), default='', nullable=True)
+
+
+class TaskerSetting(db.Model):
+    """Singleton row (id=1) with the Tasker housekeeping switches.
+
+    Kept in a tasker_* table so the module never needs the application-wide
+    ``Settings`` row — isolation stays intact.
+    """
+
+    __tablename__ = 'tasker_setting'
+
+    id = db.Column(db.Integer, primary_key=True)
+    # Auto-clean: delete closed tasks (DELIVERED, optionally CANCELLED) once
+    # they are older than ``auto_clean_days`` days.  Off by default.
+    auto_clean_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    auto_clean_days = db.Column(db.Integer, default=30, nullable=False)
+    auto_clean_include_cancelled = db.Column(db.Boolean, default=True, nullable=False)
+    updated_by = db.Column(db.String(80), nullable=True)
+    updated_at = db.Column(db.DateTime, default=pk_model_now, onupdate=pk_model_now)
+
+
+class TaskerCleanupLog(db.Model):
+    """Permanent record of every task removed from the board.
+
+    A deleted task takes its items, events and deadline resets with it, so this
+    log is the only surviving proof of what existed and who removed it.  It
+    deliberately has **no foreign key** (neither to the deleted task nor to any
+    other AMS table): ``task_id`` is a plain snapshot integer, exactly like the
+    client/material reference hints elsewhere in Tasker.
+    """
+
+    __tablename__ = 'tasker_cleanup_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    task_id = db.Column(db.Integer, nullable=False, index=True)
+    task_no = db.Column(db.String(20), nullable=False, index=True)
+    client_name = db.Column(db.String(160), default='', nullable=True)
+    status = db.Column(db.String(20), default='', nullable=True)
+    items_count = db.Column(db.Integer, default=0, nullable=False)
+    # MANUAL (one row button) | BULK (ticked rows) | CLEANUP (age sweep)
+    # | AUTO (background auto-clean)
+    mode = db.Column(db.String(20), nullable=False)
+    deleted_by = db.Column(db.String(80), nullable=True)  # username or 'auto'
+    deleted_at = db.Column(db.DateTime, default=pk_model_now, index=True)
+    reason = db.Column(db.String(300), default='', nullable=True)

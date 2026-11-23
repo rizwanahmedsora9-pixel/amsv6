@@ -38,7 +38,11 @@
         padding: 5px 14px; font-size: .8rem; }
     .tk-filter-btn.active { background: #f8b71e; border-color: #f8b71e; color: #1e293b; font-weight: 700; }
     .tk-alarm-bar { background: #7f1d1d; border: 2px solid #dc3545; color: #fff; border-radius: 12px;
-        padding: 12px 18px; display: none; align-items: center; gap: 12px; animation: tk-pulse 1.6s ease-in-out infinite; }
+        padding: 12px 18px; display: none; align-items: center; gap: 12px; animation: tk-alarm-flash .8s ease-in-out infinite; }
+    @keyframes tk-alarm-flash {
+        0%, 100% { background: #7f1d1d; box-shadow: 0 0 0 0 rgba(220,53,69,0); }
+        50% { background: #dc2626; box-shadow: 0 0 28px rgba(220,53,69,.85); }
+    }
     .tk-detail-box { background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 14px; }
     .tk-timeline { border-left: 2px solid #475569; margin-left: 8px; padding-left: 16px; }
     .tk-timeline-item { position: relative; margin-bottom: 10px; font-size: .82rem; }
@@ -54,6 +58,11 @@
     .modal-header, .modal-footer { border-color: #475569; }
     .tk-link { color: #f8b71e; text-decoration: none; cursor: pointer; }
     .tk-link:hover { text-decoration: underline; }
+    .tk-clean-box { background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+    .tk-clean-box h6 { color: #f8b71e; font-size: .86rem; text-transform: uppercase; letter-spacing: .04em; }
+    .tk-clean-notice { background: #14532d; border: 1px solid #22c55e; color: #dcfce7; border-radius: 10px; padding: 10px 16px; }
+    .tk-recent-cleanup { font-size: .78rem; color: #cbd5e1; padding: 4px 0; border-bottom: 1px dashed #334155; }
+    .tk-recent-cleanup:last-child { border-bottom: 0; }
 </style>
 
 <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
@@ -64,10 +73,21 @@
             NEW → NOTED → LOADED → DISPATCHED → DELIVERED.
         </div>
     </div>
-    <button id="tkNewTaskBtn" class="btn btn-warning fw-bold" style="display:none;">
-        <i class="bi bi-plus-lg me-1"></i> New Task
-    </button>
+    <div class="d-flex flex-wrap gap-2">
+        <button id="tkCleanBtn" class="btn btn-outline-danger fw-bold" style="display:none;">
+            <i class="bi bi-trash3 me-1"></i> Clean up
+        </button>
+        <button id="tkTestSirenBtn" class="btn btn-outline-light fw-bold" style="display:none;"
+                title="Unlock and test the alarm siren">
+            <i class="bi bi-volume-up-fill me-1"></i> Test siren
+        </button>
+        <button id="tkNewTaskBtn" class="btn btn-warning fw-bold" style="display:none;">
+            <i class="bi bi-plus-lg me-1"></i> New Task
+        </button>
+    </div>
 </div>
+
+<div id="tkCleanNotice" class="tk-clean-notice mb-3" style="display:none;"></div>
 
 <div id="tkAlarmBar" class="tk-alarm-bar mb-3">
     <i class="bi bi-exclamation-octagon-fill" style="font-size:1.5rem;"></i>
@@ -76,6 +96,9 @@
         <div style="font-size:.78rem;">The alarm sounds until an admin opens the task and resets the time manually.</div>
     </div>
     <span class="tk-chip tk-chip-OVERDUE">ALARM ON</span>
+    <button type="button" class="btn btn-sm btn-light fw-bold" id="tkSoundBtn" style="display:none;">
+        <i class="bi bi-volume-mute-fill me-1"></i> Enable siren
+    </button>
 </div>
 
 <div class="row g-2 mb-3" id="tkCounters">
@@ -93,6 +116,9 @@
         <button class="tk-filter-btn" data-filter="overdue">Overdue</button>
         <button class="tk-filter-btn" data-filter="done">Delivered</button>
         <button class="tk-filter-btn" data-filter="cancelled">Cancelled</button>
+        <button id="tkCleanSelectedBtn" class="btn btn-sm btn-danger" style="display:none;">
+            <i class="bi bi-trash3 me-1"></i> Delete selected (<span id="tkSelCount">0</span>)
+        </button>
         <input id="tkSearch" class="form-control ms-auto" style="max-width:260px;"
                placeholder="Search task no / client / item…">
     </div>
@@ -101,6 +127,9 @@
         <table class="table table-dark table-hover align-middle tk-table mb-0">
             <thead>
                 <tr>
+                    {% if tasker_is_admin %}
+                    <th style="width:36px;"><input type="checkbox" id="tkSelectAll" title="Select all visible"></th>
+                    {% endif %}
                     <th>Task</th>
                     <th>Client</th>
                     <th>Items</th>
@@ -112,7 +141,7 @@
                 </tr>
             </thead>
             <tbody id="tkBoardBody">
-                <tr><td colspan="8" class="text-center text-secondary py-4">Loading…</td></tr>
+                <tr><td colspan="{{ 9 if tasker_is_admin else 8 }}" class="text-center text-secondary py-4">Loading…</td></tr>
             </tbody>
         </table>
     </div>
@@ -229,5 +258,153 @@
     </div>
 </div>
 
-<script src="{{ url_for('static', filename='tasker.js') }}?v=1"></script>
+<!-- ===================== Clean up modal (admin) ===================== -->
+<div class="modal fade" id="tkCleanModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-trash3 me-2"></i>Clean up Tasker</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-secondary mb-3" style="font-size:.82rem; background:#0f172a; border-color:#334155; color:#cbd5e1;">
+                    <i class="bi bi-shield-lock me-1"></i> <strong>Admin only.</strong>
+                    Deleting is permanent — the task, its items, timeline and reset history are
+                    removed. A snapshot is kept in the cleanup log below.
+                </div>
+
+                <div class="tk-clean-box">
+                    <h6>Selected tasks</h6>
+                    <div class="text-secondary" style="font-size:.8rem;">
+                        Tick tasks in the list to delete specific wrong ones — <strong>including DELIVERED tasks</strong>.
+                    </div>
+                    <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                        <span class="tk-chip tk-chip-NEW"><span id="tkCleanSelCount">0</span> selected</span>
+                        <input id="tkSelectedReason" class="form-control form-control-sm" style="max-width:260px;"
+                               placeholder="Reason (optional)" maxlength="300">
+                        <button type="button" class="btn btn-sm btn-danger" id="tkDeleteSelectedBtn" disabled>
+                            <i class="bi bi-trash3 me-1"></i> Delete selected
+                        </button>
+                    </div>
+                    <div class="text-danger mt-2" id="tkSelectedError" style="display:none;font-size:.8rem;"></div>
+                </div>
+
+                <div class="tk-clean-box">
+                    <h6>Auto-clean (runs by itself)</h6>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="tkAutoCleanEnabled">
+                        <label class="form-check-label" for="tkAutoCleanEnabled" style="font-size:.84rem;">
+                            Automatically delete closed tasks after the retention below
+                        </label>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-6 col-md-4">
+                            <label class="form-label" style="font-size:.78rem;">Keep closed tasks for (days)</label>
+                            <input type="number" min="1" max="3650" class="form-control form-control-sm"
+                                   id="tkAutoCleanDays" value="30">
+                        </div>
+                        <div class="col-6 col-md-8 d-flex align-items-end pb-1">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="tkAutoCleanCancelled" checked>
+                                <label class="form-check-label" for="tkAutoCleanCancelled" style="font-size:.8rem;">
+                                    Also auto-clean CANCELLED tasks (DELIVERED is always included)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                        <button type="button" class="btn btn-sm btn-warning" id="tkSaveSettings">
+                            <i class="bi bi-check-lg me-1"></i> Save auto-clean
+                        </button>
+                        <span id="tkSettingsMsg" class="text-secondary" style="font-size:.78rem;"></span>
+                    </div>
+                </div>
+
+                <div class="tk-clean-box">
+                    <h6>Clean by age (manual)</h6>
+                    <div class="d-flex flex-wrap gap-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="tkCleanDelivered" checked>
+                            <label class="form-check-label" for="tkCleanDelivered" style="font-size:.82rem;">DELIVERED</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="tkCleanCancelled" checked>
+                            <label class="form-check-label" for="tkCleanCancelled" style="font-size:.82rem;">CANCELLED</label>
+                        </div>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <div class="col-6 col-md-4">
+                            <label class="form-label" style="font-size:.78rem;">Older than (days)</label>
+                            <input type="number" min="0" max="3650" class="form-control form-control-sm"
+                                   id="tkCleanDays" value="30">
+                        </div>
+                        <div class="col-6 col-md-8">
+                            <label class="form-label" style="font-size:.78rem;">Reason (optional)</label>
+                            <input class="form-control form-control-sm" id="tkCleanReason" maxlength="300"
+                                   placeholder="e.g. year-end cleanup">
+                        </div>
+                    </div>
+                    <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                        <button type="button" class="btn btn-sm btn-outline-warning" id="tkCleanPreviewBtn">
+                            <i class="bi bi-search me-1"></i> Preview
+                        </button>
+                        <input id="tkCleanConfirm" class="form-control form-control-sm" style="max-width:200px;"
+                               placeholder="Type DELETE to enable" autocomplete="off">
+                        <button type="button" class="btn btn-sm btn-danger" id="tkCleanRunBtn" disabled>
+                            <i class="bi bi-trash3 me-1"></i> Delete matched
+                        </button>
+                    </div>
+                    <div id="tkCleanPreview" class="mt-2 text-secondary" style="font-size:.8rem;">
+                        Press Preview to see how many closed tasks match.
+                    </div>
+                    <div class="text-danger mt-2" id="tkCleanError" style="display:none;font-size:.8rem;"></div>
+                </div>
+
+                <div class="tk-clean-box">
+                    <h6>Recent cleanups</h6>
+                    <div id="tkRecentCleanups" class="text-secondary" style="font-size:.8rem;">Loading…</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== Delete task modal (admin) ===================== -->
+<div class="modal fade" id="tkDeleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-danger"><i class="bi bi-exclamation-triangle me-2"></i>Delete task — <span id="tkDeleteTaskNo"></span></h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger" style="font-size:.82rem;">
+                    This permanently deletes the task, its items, timeline and reset history.
+                    It cannot be undone.
+                </div>
+                <div id="tkDeleteSummary" class="mb-3" style="font-size:.84rem;"></div>
+                <div class="mb-2">
+                    <label class="form-label" style="font-size:.8rem;">Reason (optional)</label>
+                    <input id="tkDeleteReason" class="form-control form-control-sm" maxlength="300">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label" style="font-size:.8rem;">Type <strong>DELETE</strong> to confirm</label>
+                    <input id="tkDeleteConfirm" class="form-control form-control-sm" autocomplete="off" placeholder="DELETE">
+                </div>
+                <div class="text-danger" id="tkDeleteError" style="display:none;font-size:.8rem;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger fw-bold" id="tkDeleteSave" disabled>
+                    <i class="bi bi-trash3 me-1"></i> Delete forever
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='tasker.js') }}?v=3"></script>
 {% endblock %}

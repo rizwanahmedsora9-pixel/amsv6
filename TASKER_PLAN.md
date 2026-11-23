@@ -1,6 +1,7 @@
 # TASKER — Isolated Delivery Tracking Board (PLAN → AS-BUILT)
 
 > Status: **IMPLEMENTED 2026-11-22** — owner decisions confirmed (see §8).
+> **2026-11-23:** admin-only cleanup + auto-clean added (see §9).
 > Goal: a fully isolated tracking module. No sales, no delivery, no bill, no stock,
 > no payments — nothing else in the app is read from or written to except
 > read-only name lookups (clients / materials) for the combo boxes.
@@ -106,11 +107,16 @@ path — no manual migration needed for new tables.
   - each trip turns the row **RED with a pulsing highlight** + `NOTE LATE` /
     `DELIVERY LATE` chips and starts the **looping alarm sound** (Web Audio
     beep — no audio file, works offline).
-- **Global scope** (owner decision): the same beep + a pulsing red
-  "⚠ TASKER ALARM — N deadline missed" badge follows users on **every AMS
-  page** via `static/tasker_alarm.js` (one `<script>` include in
-  `layout.html`; the widget only polls the read-only
-  `/tasker/api/alarm_state`).
+- **Global scope** (owner decision): a **police-style siren** + a fixed **red
+  flashing banner** ("⚠ TASKER ALARM — N deadline(s) missed — TK-0001
+  (NOTE+DELIVERY) …") follows users on **every AMS page** via
+  `static/tasker_alarm.js` (two `<script>` includes in `layout.html`: the
+  shared `tasker_siren.js` and the widget; the widget polls
+  `/tasker/api/alarm_state` every 5 s).  Browsers block Web Audio until the
+  first user gesture, so the banner carries an **Enable siren** button and any
+  click/keypress unlocks the siren; the red message never depends on audio.
+  The board page itself uses the same shared siren and its own flashing
+  `tkAlarmBar`, which lists the overdue task numbers and deadline kinds.
 - The alarm **cannot be dismissed by normal users** (no snooze, no mute). It
   keeps sounding until **admin**:
   1. opens the task (this is "admin sees it"),
@@ -147,8 +153,11 @@ Extends `layout.html`, Bootstrap 5 + icons + flatpickr like the rest of AMS.
     (any user); admin extras: **Reset time**, Cancel, Reopen; expandable
     detail row with items table, timeline and reset history.
 - **Alarm banner** at the top of the page whenever any deadline is overdue:
-  red bar "⚠ TASKER ALARM — N deadline(s) missed … admin must reset the time",
-  with the looping sound.
+  flashing red bar "⚠ TASKER ALARM — N deadline(s) missed — TK-0001
+  (NOTE+DELIVERY) …", with the shared police siren.  It carries an
+  **Enable siren** button (browsers require one click before audio), and the
+  admin header has a **Test siren** button to unlock/check the sound before a
+  deadline is missed.
 
 ---
 
@@ -163,8 +172,9 @@ Extends `layout.html`, Bootstrap 5 + icons + flatpickr like the rest of AMS.
 | `blueprints/tasker/api.py` | **NEW** — board JSON, combo lookups (read-only), status actions, reset deadline |
 | `templates/tasker.html` | **NEW** — the page |
 | `static/tasker.js` | **NEW** — combos, countdown, polling, alarm sound |
-| `static/tasker_alarm.js` | **NEW** — global red badge + beep on every page (owner decision) |
-| `templates/layout.html` | +1 `<script>` include for the global alarm widget |
+| `static/tasker_siren.js` | **NEW** — shared Web Audio police siren (`window.AMSTaskerSiren`) |
+| `static/tasker_alarm.js` | **NEW** — global red flashing banner + police siren on every page |
+| `templates/layout.html` | +2 `<script>` includes for the shared siren + global alarm widget |
 | `app/services/sidebar_nav.py` | +1 `NavLink` ("Tasker") |
 | `tests/test_tasker.py` | **NEW** — lifecycle, overdue→red→reset, isolation check (no writes to other tables) |
 
@@ -201,6 +211,63 @@ appear in the app-wide logs either.
    deadline manually.  On the Tasker page itself the alarm additionally shows
    a banner and turns the affected rows red.
 
-**Tests:** `tests/test_tasker.py` — 11 tests (lifecycle, forward-only,
+**Tests:** `tests/test_tasker.py` — 18 tests (lifecycle, forward-only,
 both deadline alarms, admin-only rules, read-only combos, FK isolation,
-no-domain-writes).  Full suite: 157 passed.
+no-domain-writes, permanent delete, cleanup sweep, auto-clean).
+Full suite: 164 passed.
+
+---
+
+## 9. Cleanup & auto-clean (owner request 2026-11-23)
+
+The board had **no way to remove a task** — not even a DELIVERED one.  It now
+has a full admin-only cleanup path.  Nothing here weakens the isolation: the
+two new tables are `tasker_*` only and have **no foreign keys** at all.
+
+### 9.1 Delete is admin-only — for **every** status
+
+- `POST /tasker/api/tasks/<id>/delete` (admin/root only, else 403) permanently
+  removes **any** task: `NEW`, `NOTED`, `LOADED`, `DISPATCHED`, `DELIVERED`,
+  `CANCELLED`.  This is the "even completed marked" rule — a plain user can
+  never delete a completed task.
+- Requires the literal confirmation word `DELETE` in the JSON body; a missing
+  or wrong word is a 400, so a stray click cannot destroy a task.
+- Items, events and deadline resets go with the task through the model
+  cascades.  A snapshot row is written first to `tasker_cleanup_log`.
+
+### 9.2 Cleanup log (permanent proof)
+
+`tasker_cleanup_log` keeps, for every removed task: `task_id` (plain snapshot
+int, **no FK**), `task_no`, client name, status, item count, mode
+(`MANUAL` / `BULK` / `CLEANUP` / `AUTO`), who deleted it (`auto` for auto-clean),
+when, and the reason.  Task numbers are never reused: `next_task_no()` takes
+its high-water mark from both live tasks and this log.
+
+### 9.3 Manual cleanup tools (admin "Clean up" button)
+
+1. **Selected tasks** — tick rows in the board (admin only) and delete the
+   specific wrong ones, including completed tasks (`POST /api/tasks/bulk_delete`).
+2. **Clean by age** — pick `DELIVERED` / `CANCELLED`, "older than N days",
+   optional reason.  **Preview** runs a dry run and reports the exact match
+   count before anything is removed (`POST /api/cleanup` with `dry_run: true`).
+   The real run needs `DELETE` typed in the modal.
+3. **Recent cleanups** — the last 12 log rows, shown in the same modal.
+
+### 9.4 Auto-clean (optional, off by default)
+
+- `GET/POST /tasker/api/settings` (admin only) stores the switches in the
+  singleton `tasker_setting` row: `auto_clean_enabled`, `auto_clean_days`
+  (1–3650, default 30), `auto_clean_include_cancelled` (default on).
+- When enabled, the sweep runs lazily from the board poll and the global alarm
+  poll (throttled to once per process every 5 minutes), so it also runs while
+  nobody has the Tasker page open.  It only ever deletes **closed** tasks past
+  retention — an active task can never be auto-deleted.
+- Every auto-cleaned task is logged with `mode=AUTO`, `deleted_by='auto'`.
+
+### 9.5 UI
+
+- Admin sees a **Clean up** button next to **New Task**, a trash button on every
+  row (any status), row checkboxes + "Delete selected", and a cleanup modal with
+  the four blocks above.  Non-admins see none of it and get 403 from every
+  cleanup endpoint.
+- The board shows a green one-minute notice when auto-clean removed something.
