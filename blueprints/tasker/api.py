@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from models import (
     TaskerCleanupLog,
     TaskerDeadlineReset,
+    TaskerEvent,
     TaskerItem,
     TaskerSetting,
     TaskerTask,
@@ -213,6 +214,17 @@ def api_materials_search():
 # ---------------------------------------------------------------------------
 # Create (admin only)
 # ---------------------------------------------------------------------------
+def _task_for_request(request_id):
+    """The task a previous create with this request_id produced, if any."""
+    since = pk_model_now() - timedelta(days=1)
+    ev = (TaskerEvent.query
+          .filter(TaskerEvent.event == 'CREATED',
+                  TaskerEvent.at >= since,
+                  TaskerEvent.detail.like(f'%; req:{request_id}%'))
+          .order_by(TaskerEvent.id.desc()).first())
+    return TaskerTask.query.get(ev.task_id) if ev else None
+
+
 @tasker_bp.route('/api/tasks', methods=['POST'])
 @login_required
 def api_create_task():
@@ -254,6 +266,16 @@ def api_create_task():
     except ValueError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 400
 
+    # Double-submit guard: the modal sends one request_id per opening.  If the
+    # same id already created a task (double click, or a retry after a slow or
+    # failed response), return that task instead of creating a second one.
+    request_id = str(payload.get('request_id') or '').strip()[:64]
+    if request_id:
+        earlier = _task_for_request(request_id)
+        if earlier is not None:
+            return jsonify({'success': True, 'duplicate': True,
+                            'task': task_to_dict(earlier)})
+
     task = TaskerTask(
         task_no=next_task_no(),
         client_ref_id=payload.get('client_ref_id'),
@@ -279,8 +301,10 @@ def api_create_task():
         db.session.flush()
     for idx, raw in enumerate(items, start=1):
         db.session.add(TaskerItem(task_id=task.id, line_no=idx, **raw))
-    log_event(task, 'CREATED',
-              f"{len(items)} item(s); note DL={note_dl}; delivery DL={del_dl}")
+    detail = f"{len(items)} item(s); note DL={note_dl}; delivery DL={del_dl}"
+    if request_id:
+        detail += f"; req:{request_id}"
+    log_event(task, 'CREATED', detail)
     sync_alarms(task, commit=False)
     db.session.commit()
     return jsonify({'success': True, 'task': task_to_dict(task)})
