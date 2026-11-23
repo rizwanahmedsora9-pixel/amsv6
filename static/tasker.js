@@ -775,6 +775,19 @@
         document.addEventListener('visibilitychange', function () {
             if (!document.hidden) loadBoard();
         });
+
+        // Auto-refresh the Tasker page every 60 seconds.  Never while a dialog
+        // is open (New Task, reset, cleanup…) — a reload would throw away what
+        // the user is typing — so it waits until the dialog is closed.
+        (function scheduleAutoRefresh() {
+            setTimeout(function () {
+                if (document.querySelector('.modal.show')) {
+                    setTimeout(scheduleAutoRefresh, 5000);
+                    return;
+                }
+                window.location.reload();
+            }, 60000);
+        })();
     });
 
     // ------------------------------------------------------- cleanup helpers
